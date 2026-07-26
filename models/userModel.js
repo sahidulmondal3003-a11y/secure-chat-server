@@ -39,12 +39,26 @@ async function setOnlineStatus(userId, isOnline) {
 }
 
 async function searchUsers(term, excludeUserId, limit = 20) {
+  limit = Number(limit) || 20;
+
   return query(
-    `SELECT id, username, display_name, avatar_color, is_online, last_seen
+    `SELECT
+      id,
+      username,
+      display_name,
+      avatar_color,
+      is_online,
+      last_seen
      FROM users
-     WHERE username LIKE ? AND id != ? AND is_banned = 0
-     ORDER BY username ASC LIMIT ?`,
-    [`%${term}%`, excludeUserId, limit]
+     WHERE username LIKE ?
+       AND id != ?
+       AND is_banned = 0
+     ORDER BY username ASC
+     LIMIT ${limit}`,
+    [
+      `%${term}%`,
+      excludeUserId
+    ]
   );
 }
 
