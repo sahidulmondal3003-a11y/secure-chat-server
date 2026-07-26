@@ -83,6 +83,9 @@ function getPool() {
 /**
  * Convenience query helper - always uses prepared statements (? placeholders).
  */
+/**
+ * Convenience query helper - always uses prepared statements (? placeholders).
+ */
 async function query(sql, params = []) {
   const conn = getPool();
 
@@ -92,7 +95,13 @@ async function query(sql, params = []) {
   console.log(params);
   console.log("========================");
 
-  const [rows] = await conn.query(sql, params); // execute() এর বদলে query()
+  const [rows] = await conn.query(sql, params);
 
   return rows;
 }
+
+module.exports = {
+  initDb,
+  getPool,
+  query,
+};
