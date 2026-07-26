@@ -111,12 +111,19 @@ async function markAllSeenInChat(chatType, chatId, userId) {
 }
 
 async function searchMessages(chatType, chatId, term, limit = 50) {
+  limit = Math.max(1, Math.min(parseInt(limit, 10) || 50, 100));
+
   return query(
     `SELECT m.*, u.display_name as sender_display_name
-     FROM messages m JOIN users u ON u.id = m.sender_id
-     WHERE m.chat_type = ? AND m.chat_id = ? AND m.is_deleted = 0 AND m.content LIKE ?
-     ORDER BY m.created_at DESC LIMIT ?`,
-    [chatType, chatId, `%${term}%`, limit]
+     FROM messages m
+     JOIN users u ON u.id = m.sender_id
+     WHERE m.chat_type = ?
+       AND m.chat_id = ?
+       AND m.is_deleted = 0
+       AND m.content LIKE ?
+     ORDER BY m.created_at DESC
+     LIMIT ${limit}`,
+    [chatType, chatId, `%${term}%`]
   );
 }
 
