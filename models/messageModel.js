@@ -45,6 +45,7 @@ async function listMessages(chatType, chatId, { limit = 30, before = null } = {}
     LEFT JOIN messages r ON r.id = m.reply_to_id
     LEFT JOIN users ru ON ru.id = r.sender_id
     WHERE m.chat_type = ? AND m.chat_id = ?`;
+
   const params = [chatType, chatId];
 
   if (before) {
@@ -52,8 +53,9 @@ async function listMessages(chatType, chatId, { limit = 30, before = null } = {}
     params.push(before);
   }
 
-  sql += ' ORDER BY m.created_at DESC LIMIT ?';
-  params.push(limit);
+  limit = Math.max(1, Math.min(parseInt(limit, 10) || 30, 100));
+
+  sql += ` ORDER BY m.created_at DESC LIMIT ${limit}`;
 
   const rows = await query(sql, params);
   return rows.reverse();
