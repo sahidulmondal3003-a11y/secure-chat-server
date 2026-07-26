@@ -15,7 +15,7 @@ const compression = require('compression');
 
 const config = require('./config');
 const logger = require('./utils/logger');
-const { initDb } = require('./db');
+const initDb = require('./db');
 const { initSocket } = require('./socket');
 const { verifyCsrf } = require('./middlewares/csrf');
 const { generalLimiter } = require('./middlewares/rateLimiter');
