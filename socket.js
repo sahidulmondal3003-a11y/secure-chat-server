@@ -1,0 +1,327 @@
+/**
+ * socket.js
+ * All real-time behaviour: private + group messaging, typing indicators,
+ * online/offline presence, last seen, delivered/seen ticks, message
+ * edit/delete/reply, unread counters, and simple in-memory spam protection.
+ */
+const { Server } = require('socket.io');
+const config = require('./config');
+const logger = require('./utils/logger');
+const { authenticateSocket } = require('./middlewares/auth');
+const { sanitize, newId } = require('./utils/helpers');
+
+const userModel = require('./models/userModel');
+const groupModel = require('./models/groupModel');
+const conversationModel = require('./models/conversationModel');
+const messageModel = require('./models/messageModel');
+const { logActivity, incrementUnread } = require('./models/logModel');
+
+// userId -> Set of socket.io socket ids (supports multiple tabs/devices)
+const onlineUsers = new Map();
+
+// socketId -> { count, windowStart } simple in-memory sliding window for spam protection
+const messageRateMap = new Map();
+const MSG_WINDOW_MS = 10 * 1000;
+const MSG_MAX_PER_WINDOW = 20;
+
+function isSpamming(socketId) {
+  const now = Date.now();
+  const entry = messageRateMap.get(socketId) || { count: 0, windowStart: now };
+  if (now - entry.windowStart > MSG_WINDOW_MS) {
+    entry.count = 0;
+    entry.windowStart = now;
+  }
+  entry.count += 1;
+  messageRateMap.set(socketId, entry);
+  return entry.count > MSG_MAX_PER_WINDOW;
+}
+
+function roomName(chatType, chatId) {
+  return `${chatType}:${chatId}`;
+}
+
+function initSocket(server) {
+  const io = new Server(server, {
+    cors: {
+      origin: config.clientOrigins,
+      credentials: true,
+    },
+    maxHttpBufferSize: 2 * 1024 * 1024, // sockets carry text only; files go via REST upload
+  });
+
+  io.use(authenticateSocket);
+
+  io.on('connection', async (socket) => {
+    const user = socket.user;
+    logger.info(`Socket connected: ${user.username} (${socket.id})`);
+
+    // ---- Presence: mark online, join personal room ----
+    if (!onlineUsers.has(user.id)) onlineUsers.set(user.id, new Set());
+    onlineUsers.get(user.id).add(socket.id);
+
+    socket.join(`user:${user.id}`);
+
+    if (onlineUsers.get(user.id).size === 1) {
+      await userModel.setOnlineStatus(user.id, true);
+      const groups = await groupModel.listUserGroups(user.id);
+      groups.forEach((g) => socket.to(roomName('group', g.id)).emit('presence:update', { userId: user.id, isOnline: true }));
+      const conversations = await conversationModel.listUserConversations(user.id);
+      conversations.forEach((c) =>
+        io.to(`user:${c.other_user_id}`).emit('presence:update', { userId: user.id, isOnline: true })
+      );
+    }
+
+    // Auto-join all existing group rooms for this user
+    const myGroups = await groupModel.listUserGroups(user.id);
+    myGroups.forEach((g) => socket.join(roomName('group', g.id)));
+
+    // ============================================================
+    // JOIN / LEAVE explicit chat rooms (called when opening a chat UI)
+    // ============================================================
+    socket.on('chat:join', async ({ chatType, chatId }) => {
+      try {
+        if (chatType === 'private') {
+          const ok = await conversationModel.isParticipant(chatId, user.id);
+          if (!ok) return;
+        } else if (chatType === 'group') {
+          const member = await groupModel.isMember(chatId, user.id);
+          if (!member) return;
+        } else {
+          return;
+        }
+        socket.join(roomName(chatType, chatId));
+      } catch (err) {
+        logger.error('chat:join error', err.message);
+      }
+    });
+
+    socket.on('chat:leave', ({ chatType, chatId }) => {
+      socket.leave(roomName(chatType, chatId));
+    });
+
+    // ============================================================
+    // MESSAGING
+    // ============================================================
+    socket.on('message:send', async (payload, ack) => {
+      try {
+        if (isSpamming(socket.id)) {
+          if (ack) ack({ success: false, message: 'You are sending messages too fast. Slow down.' });
+          return;
+        }
+
+        const { chatType, chatId, content, messageType = 'text', fileUrl, fileName, fileSize, replyToId } = payload || {};
+
+        if (!chatType || !chatId) {
+          if (ack) ack({ success: false, message: 'chatType and chatId are required.' });
+          return;
+        }
+
+        // Access control
+        if (chatType === 'private') {
+          const ok = await conversationModel.isParticipant(chatId, user.id);
+          if (!ok) {
+            if (ack) ack({ success: false, message: 'Access denied.' });
+            return;
+          }
+        } else if (chatType === 'group') {
+          const member = await groupModel.isMember(chatId, user.id);
+          if (!member) {
+            if (ack) ack({ success: false, message: 'You are not a member of this group.' });
+            return;
+          }
+        } else {
+          if (ack) ack({ success: false, message: 'Invalid chat type.' });
+          return;
+        }
+
+        const cleanContent = messageType === 'text' ? sanitize((content || '').trim()) : sanitize(content || '');
+
+        if (messageType === 'text' && cleanContent.length === 0) {
+          if (ack) ack({ success: false, message: 'Message cannot be empty.' });
+          return;
+        }
+        if (messageType === 'text' && cleanContent.length > 5000) {
+          if (ack) ack({ success: false, message: 'Message is too long (max 5000 characters).' });
+          return;
+        }
+
+        const message = await messageModel.createMessage({
+          chatType,
+          chatId,
+          senderId: user.id,
+          content: cleanContent,
+          messageType,
+          fileUrl: fileUrl || null,
+          fileName: fileName || null,
+          fileSize: fileSize || null,
+          replyToId: replyToId || null,
+        });
+
+        const room = roomName(chatType, chatId);
+        io.to(room).emit('message:new', message);
+
+        // Unread counters + browser-notification hint for offline/away recipients
+        if (chatType === 'private') {
+          const convo = await conversationModel.findConversationById(chatId);
+          const otherId = convo.user_one_id === user.id ? convo.user_two_id : convo.user_one_id;
+          await incrementUnread(otherId, 'private', chatId);
+          io.to(`user:${otherId}`).emit('notification:new', {
+            chatType: 'private',
+            chatId,
+            from: user.display_name,
+            preview: messageType === 'text' ? cleanContent.slice(0, 120) : `Sent a ${messageType}`,
+          });
+        } else {
+          const members = await groupModel.listMembers(chatId);
+          for (const m of members) {
+            if (m.id === user.id) continue;
+            await incrementUnread(m.id, 'group', chatId);
+            io.to(`user:${m.id}`).emit('notification:new', {
+              chatType: 'group',
+              chatId,
+              from: user.display_name,
+              preview: messageType === 'text' ? cleanContent.slice(0, 120) : `Sent a ${messageType}`,
+            });
+          }
+        }
+
+        if (ack) ack({ success: true, message });
+      } catch (err) {
+        logger.error('message:send error', err.message);
+        if (ack) ack({ success: false, message: 'Failed to send message.' });
+      }
+    });
+
+    socket.on('message:edit', async ({ messageId, chatType, chatId, content }, ack) => {
+      try {
+        const clean = sanitize((content || '').trim());
+        if (!clean) {
+          if (ack) ack({ success: false, message: 'Message cannot be empty.' });
+          return;
+        }
+        const updated = await messageModel.editMessage(messageId, user.id, clean);
+        io.to(roomName(chatType, chatId)).emit('message:edited', updated);
+        if (ack) ack({ success: true, message: updated });
+      } catch (err) {
+        logger.error('message:edit error', err.message);
+        if (ack) ack({ success: false, message: 'Failed to edit message.' });
+      }
+    });
+
+    socket.on('message:delete', async ({ messageId, chatType, chatId, forEveryone }, ack) => {
+      try {
+        if (forEveryone) {
+          const isAdmin = user.role === 'admin';
+          const updated = await messageModel.deleteMessageForEveryone(messageId, user.id, isAdmin);
+          io.to(roomName(chatType, chatId)).emit('message:deleted', { messageId, forEveryone: true, message: updated });
+        } else {
+          // "Delete for me" is a client-side-only concept for this lightweight
+          // implementation - we simply acknowledge; the client hides it locally.
+          socket.emit('message:deleted', { messageId, forEveryone: false });
+        }
+        if (ack) ack({ success: true });
+      } catch (err) {
+        logger.error('message:delete error', err.message);
+        if (ack) ack({ success: false, message: 'Failed to delete message.' });
+      }
+    });
+
+    // ============================================================
+    // RECEIPTS: delivered + seen ticks
+    // ============================================================
+    socket.on('message:delivered', async ({ messageId, chatType, chatId }) => {
+      try {
+        await messageModel.markDelivered(messageId, user.id);
+        io.to(roomName(chatType, chatId)).emit('message:status', { messageId, status: 'delivered', userId: user.id });
+      } catch (err) {
+        logger.error('message:delivered error', err.message);
+      }
+    });
+
+    socket.on('chat:seen', async ({ chatType, chatId }) => {
+      try {
+        await messageModel.markAllSeenInChat(chatType, chatId, user.id);
+        socket.to(roomName(chatType, chatId)).emit('chat:seen', { chatType, chatId, userId: user.id, seenAt: new Date().toISOString() });
+      } catch (err) {
+        logger.error('chat:seen error', err.message);
+      }
+    });
+
+    // ============================================================
+    // TYPING INDICATOR
+    // ============================================================
+    socket.on('typing:start', ({ chatType, chatId }) => {
+      socket.to(roomName(chatType, chatId)).emit('typing:update', {
+        chatType,
+        chatId,
+        userId: user.id,
+        displayName: user.display_name,
+        isTyping: true,
+      });
+    });
+
+    socket.on('typing:stop', ({ chatType, chatId }) => {
+      socket.to(roomName(chatType, chatId)).emit('typing:update', {
+        chatType,
+        chatId,
+        userId: user.id,
+        displayName: user.display_name,
+        isTyping: false,
+      });
+    });
+
+    // ============================================================
+    // GROUP membership live updates
+    // ============================================================
+    socket.on('group:joined', async ({ groupId }) => {
+      socket.join(roomName('group', groupId));
+      const member = await groupModel.isMember(groupId, user.id);
+      if (member) {
+        io.to(roomName('group', groupId)).emit('group:member-joined', {
+          groupId,
+          userId: user.id,
+          displayName: user.display_name,
+        });
+      }
+    });
+
+    socket.on('group:left', ({ groupId }) => {
+      io.to(roomName('group', groupId)).emit('group:member-left', { groupId, userId: user.id, displayName: user.display_name });
+      socket.leave(roomName('group', groupId));
+    });
+
+    // ============================================================
+    // DISCONNECT: presence + last seen
+    // ============================================================
+    socket.on('disconnect', async () => {
+      logger.info(`Socket disconnected: ${user.username} (${socket.id})`);
+      messageRateMap.delete(socket.id);
+
+      const sockets = onlineUsers.get(user.id);
+      if (sockets) {
+        sockets.delete(socket.id);
+        if (sockets.size === 0) {
+          onlineUsers.delete(user.id);
+          await userModel.setOnlineStatus(user.id, false);
+
+          const groups = await groupModel.listUserGroups(user.id);
+          groups.forEach((g) =>
+            io.to(roomName('group', g.id)).emit('presence:update', { userId: user.id, isOnline: false, lastSeen: new Date().toISOString() })
+          );
+          const conversations = await conversationModel.listUserConversations(user.id);
+          conversations.forEach((c) =>
+            io.to(`user:${c.other_user_id}`).emit('presence:update', { userId: user.id, isOnline: false, lastSeen: new Date().toISOString() })
+          );
+        }
+      }
+    });
+  });
+
+  return io;
+}
+
+function isUserOnline(userId) {
+  return onlineUsers.has(userId);
+}
+
+module.exports = { initSocket, isUserOnline };
