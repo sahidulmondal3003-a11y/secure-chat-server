@@ -55,23 +55,42 @@ async function start() {
   // ---------------------------------------------------------
   // Security middleware
   // ---------------------------------------------------------
-  app.use(
-    helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'"],
-          styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-          fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-          imgSrc: ["'self'", 'data:', 'blob:'],
-          mediaSrc: ["'self'", 'blob:'],
-          connectSrc: ["'self'", ...config.clientOrigins],
-        },
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrcAttr: ["'unsafe-inline'"],
+        styleSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "https://fonts.googleapis.com"
+        ],
+        fontSrc: [
+          "'self'",
+          "https://fonts.gstatic.com"
+        ],
+        imgSrc: [
+          "'self'",
+          "data:",
+          "blob:"
+        ],
+        mediaSrc: [
+          "'self'",
+          "blob:"
+        ],
+        connectSrc: [
+          "'self'",
+          ...config.clientOrigins
+        ],
       },
-      crossOriginResourcePolicy: { policy: 'cross-origin' },
-    })
-  );
-
+    },
+    crossOriginResourcePolicy: {
+      policy: "cross-origin",
+    },
+  })
+);
   app.use(
     cors({
       origin: config.clientOrigins,
