@@ -61,9 +61,13 @@ async function register(req, res, next) {
       },
       accessToken,
     });
-  } catch (err) {
-    next(err);
-  }
+ } catch (err) {
+  console.error("===== REGISTER ERROR =====");
+  console.error(err);
+  console.error("Message:", err.message);
+  console.error("Stack:", err.stack);
+  return next(err);
+}
 }
 
 async function login(req, res, next) {
