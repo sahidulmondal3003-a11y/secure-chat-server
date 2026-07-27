@@ -27,7 +27,7 @@ async function authenticate(req, res, next) {
     }
 
     const rows = await query(
-      'SELECT id, username, display_name, role, is_banned, avatar_color FROM users WHERE id = ? LIMIT 1',
+      'SELECT id, username, display_name, role, is_banned, avatar_color, avatar_url FROM users WHERE id = ? LIMIT 1',
       [decoded.id]
     );
 
@@ -81,7 +81,7 @@ async function authenticateSocket(socket, next) {
     const decoded = verifyAccessToken(token);
 
     const rows = await query(
-      'SELECT id, username, display_name, role, is_banned, avatar_color FROM users WHERE id = ? LIMIT 1',
+      'SELECT id, username, display_name, role, is_banned, avatar_color, avatar_url FROM users WHERE id = ? LIMIT 1',
       [decoded.id]
     );
 
