@@ -173,6 +173,49 @@
   </div>
 </div>
 
+<!-- ============ Message context menu (long-press / right-click) ============ -->
+<div class="mcm-backdrop hidden" id="mcmBackdrop" onclick="closeMsgContextMenu()"></div>
+<div class="msg-context-menu hidden" id="msgContextMenu" role="menu" aria-label="Message actions">
+  <div class="mcm-handle"></div>
+  <div class="mcm-item" data-action="reply" role="menuitem">↩ <span>Reply</span></div>
+  <div class="mcm-item" data-action="edit" role="menuitem">✏️ <span>Edit</span></div>
+  <div class="mcm-item" data-action="copy" role="menuitem">📋 <span>Copy</span></div>
+  <div class="mcm-item" data-action="star" role="menuitem">⭐ <span id="mcmStarLabel">Star Message</span></div>
+  <div class="mcm-item" data-action="forward" role="menuitem">📤 <span>Forward</span></div>
+  <div class="mcm-item" data-action="info" role="menuitem">ℹ️ <span>Message Info</span></div>
+  <div class="mcm-item danger" data-action="deleteMe" role="menuitem">🗑 <span>Delete for Me</span></div>
+  <div class="mcm-item danger" data-action="deleteEveryone" role="menuitem">🗑 <span>Delete for Everyone</span></div>
+  <div class="mcm-item" data-action="cancel" role="menuitem">❌ <span>Cancel</span></div>
+</div>
+
+<!-- ============ Undo snackbar (Delete for Me) ============ -->
+<div class="snackbar hidden" id="undoSnackbar">
+  <span>Message deleted</span>
+  <button type="button" onclick="undoDelete()">UNDO</button>
+</div>
+
+<!-- ============ MODAL: Forward message ============ -->
+<div class="modal-overlay hidden" id="forwardModal">
+  <div class="modal-box glass">
+    <div class="modal-title">
+      <span>Forward to...</span>
+      <button class="btn-icon" onclick="closeModal('forwardModal')">✕</button>
+    </div>
+    <div id="forwardTargetsList" style="max-height:340px;overflow-y:auto;"></div>
+  </div>
+</div>
+
+<!-- ============ MODAL: Message Info ============ -->
+<div class="modal-overlay hidden" id="msgInfoModal">
+  <div class="modal-box glass">
+    <div class="modal-title">
+      <span>Message Info</span>
+      <button class="btn-icon" onclick="closeModal('msgInfoModal')">✕</button>
+    </div>
+    <div id="msgInfoBody"></div>
+  </div>
+</div>
+
 <!-- ============ MODAL: Chat/Group Info ============ -->
 <div class="modal-overlay hidden" id="infoModal">
   <div class="modal-box glass">
