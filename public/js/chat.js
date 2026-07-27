@@ -18,6 +18,10 @@ let conversationsCache = [];
 let groupsCache = [];
 let onlineStatusCache = new Map();
 let messagesRendered = new Map(); // messageId -> DOM element, for current open chat
+let messagesData = new Map(); // messageId -> latest message object, for current open chat
+let starredMessages = new Set(); // client-side only "star" flags for this session
+let contextMenuMessageId = null;
+let pendingUndo = null; // { messageId, timeoutId }
 let pendingAvatarUrl; // undefined = no change staged, null = remove picture, string = newly uploaded url
 
 // ============================================================
@@ -59,6 +63,7 @@ function connectSocket() {
   socket.on('message:new', onIncomingMessage);
   socket.on('message:edited', onMessageEdited);
   socket.on('message:deleted', onMessageDeleted);
+  socket.on('message:restored', onMessageRestored);
   socket.on('message:status', onMessageStatus);
   socket.on('chat:seen', onChatSeen);
   socket.on('typing:update', onTypingUpdate);
@@ -187,13 +192,13 @@ function renderChatList(unreadMap = {}) {
         <div class="chat-item-top">
           <span class="chat-item-name">${escapeHtml(c.other_display_name)}</span>
         </div>
-        <div class="chat-item-preview">@${escapeHtml(c.other_username)} ${c.other_is_online ? '· online' : c.other_last_seen ? '· seen ' + timeAgo(c.other_last_seen) : ''}</div>
+        <div class="chat-item-preview">@${escapeHtml(c.other_username)} ${c.other_is_online ? '· online' : c.other_last_seen ? '· Last seen ' + timeAgo(c.other_last_seen) : ''}</div>
       </div>
       ${unread > 0 ? `<span class="unread-badge">${unread > 99 ? '99+' : unread}</span>` : ''}
     `;
     item.onclick = () => openChat('private', c.id, {
       name: c.other_display_name,
-      sub: c.other_is_online ? 'online' : (c.other_last_seen ? 'last seen ' + timeAgo(c.other_last_seen) : 'offline'),
+      sub: c.other_is_online ? 'online' : (c.other_last_seen ? 'Last seen ' + timeAgo(c.other_last_seen) : 'offline'),
       avatarColor: c.other_avatar_color,
       avatarUrl: c.other_avatar_url,
       otherUserId: c.other_user_id,
@@ -285,6 +290,7 @@ async function openChat(chatType, chatId, meta) {
   const messagesArea = document.getElementById('messagesArea');
   messagesArea.innerHTML = '<div class="empty-state">Loading messages...</div>';
   messagesRendered.clear();
+  messagesData.clear();
 
   try {
     const res = await Api.get(`/api/messages/${chatType}/${chatId}/history?limit=40`);
@@ -343,11 +349,24 @@ window.addEventListener('popstate', () => {
   }
 });
 
-// Desktop convenience: Escape key exits the open chat too.
+// Accessibility: Escape closes the message context menu, then any open
+// modal, and only then (on mobile/desktop) exits the chat back to the list.
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && document.getElementById('chatApp').classList.contains('view-chat')) {
-    const activeModal = document.querySelector('.modal-overlay:not(.hidden)');
-    if (activeModal) return; // let modal close logic handle Escape first
+  if (e.key !== 'Escape') return;
+
+  const menu = document.getElementById('msgContextMenu');
+  if (menu && !menu.classList.contains('hidden')) {
+    closeMsgContextMenu();
+    return;
+  }
+
+  const activeModal = document.querySelector('.modal-overlay:not(.hidden)');
+  if (activeModal) {
+    activeModal.classList.add('hidden');
+    return;
+  }
+
+  if (document.getElementById('chatApp').classList.contains('view-chat')) {
     backToList();
   }
 });
@@ -382,7 +401,8 @@ function fileIconFor(type) {
 
 function renderMessageBody(m) {
   if (m.is_deleted) {
-    return `<div class="msg-deleted">🚫 This message was deleted</div>`;
+    const mine = m.deleted_by === me.id;
+    return `<div class="msg-deleted">${mine ? 'You deleted this message.' : 'This message was deleted.'}</div>`;
   }
   let replyHtml = '';
   if (m.reply_to_id && m.reply_content !== null && m.reply_content !== undefined) {
@@ -426,15 +446,7 @@ function appendMessage(m, animate = true, prepend = false) {
 
   const showSenderName = activeChat.type === 'group' && !mine;
 
-  const actionsHtml = !m.is_deleted ? `
-    <div class="msg-actions">
-      <button onclick="startReply('${m.id}')" title="Reply">↩️</button>
-      ${mine && m.message_type === 'text' ? `<button onclick="startEdit('${m.id}')" title="Edit">✏️</button>` : ''}
-      ${(mine || me.role === 'admin') ? `<button onclick="deleteMessage('${m.id}', true)" title="Delete for everyone">🗑️</button>` : ''}
-    </div>` : '';
-
   row.innerHTML = `
-    ${mine ? actionsHtml : ''}
     <div class="msg-bubble-wrap">
       ${showSenderName ? `<div class="msg-sender-name">${escapeHtml(m.sender_display_name)}</div>` : ''}
       <div class="msg-bubble">
@@ -446,17 +458,260 @@ function appendMessage(m, animate = true, prepend = false) {
         </div>` : ''}
       </div>
     </div>
-    ${!mine ? actionsHtml : ''}
   `;
 
   if (prepend) area.insertBefore(row, area.firstChild);
   else area.appendChild(row);
 
   messagesRendered.set(m.id, row);
+  messagesData.set(m.id, m);
+  if (!m.is_deleted) bindMessageRowEvents(row, m.id);
 
   if (mine === false) {
     socket.emit('message:delivered', { messageId: m.id, chatType: activeChat.type, chatId: activeChat.id });
   }
+}
+
+// ============================================================
+// MESSAGE CONTEXT MENU (long-press on mobile, right-click on desktop)
+// WhatsApp-style: Reply / Edit / Copy / Star / Forward / Message Info /
+// Delete for Me / Delete for Everyone / Cancel
+// ============================================================
+function bindMessageRowEvents(row, messageId) {
+  let pressTimer = null;
+  let moved = false;
+
+  const start = (e) => {
+    moved = false;
+    const point = e.touches ? e.touches[0] : e;
+    const x = point.clientX, y = point.clientY;
+    pressTimer = setTimeout(() => {
+      if (!moved) openMsgContextMenu(messageId, x, y);
+    }, 450);
+  };
+  const cancelPress = () => { clearTimeout(pressTimer); };
+  const onMove = () => { moved = true; clearTimeout(pressTimer); };
+
+  row.addEventListener('touchstart', start, { passive: true });
+  row.addEventListener('touchend', cancelPress);
+  row.addEventListener('touchmove', onMove, { passive: true });
+  row.addEventListener('mousedown', start);
+  row.addEventListener('mouseup', cancelPress);
+  row.addEventListener('mouseleave', cancelPress);
+  row.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    clearTimeout(pressTimer);
+    openMsgContextMenu(messageId, e.clientX, e.clientY);
+  });
+}
+
+function openMsgContextMenu(messageId, x, y) {
+  const m = messagesData.get(messageId);
+  if (!m || m.is_deleted) return;
+
+  contextMenuMessageId = messageId;
+  const mine = m.sender_id === me.id;
+  const menu = document.getElementById('msgContextMenu');
+
+  menu.querySelector('[data-action="edit"]').classList.toggle('hidden', !(mine && (m.message_type === 'text' || !m.message_type)));
+  menu.querySelector('[data-action="deleteEveryone"]').classList.toggle('hidden', !(mine || me.role === 'admin'));
+  document.getElementById('mcmStarLabel').textContent = starredMessages.has(messageId) ? 'Unstar Message' : 'Star Message';
+
+  document.getElementById('mcmBackdrop').classList.remove('hidden');
+
+  const isMobile = window.innerWidth <= 768;
+  menu.classList.toggle('as-sheet', isMobile);
+  if (isMobile) {
+    menu.style.left = '0';
+    menu.style.top = '';
+  } else {
+    const menuWidth = 220, menuHeight = 340;
+    menu.style.left = Math.min(x, window.innerWidth - menuWidth - 12) + 'px';
+    menu.style.top = Math.min(y, window.innerHeight - menuHeight - 12) + 'px';
+  }
+  menu.classList.remove('hidden');
+}
+
+function closeMsgContextMenu() {
+  document.getElementById('msgContextMenu').classList.add('hidden');
+  document.getElementById('mcmBackdrop').classList.add('hidden');
+  contextMenuMessageId = null;
+}
+
+function handleMsgContextAction(action) {
+  const messageId = contextMenuMessageId;
+  closeMsgContextMenu();
+  if (!messageId) return;
+
+  switch (action) {
+    case 'reply': startReply(messageId); break;
+    case 'edit': startEdit(messageId); break;
+    case 'copy': copyMessageText(messageId); break;
+    case 'star': toggleStarMessage(messageId); break;
+    case 'forward': openForwardModal(messageId); break;
+    case 'info': openMessageInfo(messageId); break;
+    case 'deleteMe': requestDeleteForMe(messageId); break;
+    case 'deleteEveryone': requestDeleteForEveryone(messageId); break;
+    default: break;
+  }
+}
+
+async function copyMessageText(messageId) {
+  const m = messagesData.get(messageId);
+  if (!m) return;
+  const text = (m.message_type === 'text' || !m.message_type) ? (m.content || '') : (m.file_name || '');
+  try {
+    await navigator.clipboard.writeText(text);
+    Toast.success('Copied to clipboard.');
+  } catch (e) {
+    Toast.error('Could not copy.');
+  }
+}
+
+function toggleStarMessage(messageId) {
+  const row = messagesRendered.get(messageId);
+  if (starredMessages.has(messageId)) {
+    starredMessages.delete(messageId);
+    if (row) row.classList.remove('starred');
+    Toast.info('Message unstarred.');
+  } else {
+    starredMessages.add(messageId);
+    if (row) row.classList.add('starred');
+    Toast.success('Message starred.');
+  }
+}
+
+function openForwardModal(messageId) {
+  contextMenuMessageId = messageId; // reused after modal closes
+  const list = document.getElementById('forwardTargetsList');
+  const rows = [];
+
+  conversationsCache.forEach((c) => {
+    rows.push(`
+      <div class="member-row" onclick="forwardMessage('private','${c.id}','${messageId}')">
+        <div class="avatar sm" style="${avatarStyle(c.other_avatar_color, c.other_avatar_url)}">${avatarGlyph(c.other_avatar_url, c.other_display_name, false)}</div>
+        <div style="font-weight:600;font-size:13.5px;">${escapeHtml(c.other_display_name)}</div>
+      </div>`);
+  });
+  groupsCache.forEach((g) => {
+    rows.push(`
+      <div class="member-row" onclick="forwardMessage('group','${g.id}','${messageId}')">
+        <div class="avatar sm" style="background:${g.avatar_color || '#6366f1'}">👥</div>
+        <div style="font-weight:600;font-size:13.5px;">${escapeHtml(g.name)}</div>
+      </div>`);
+  });
+
+  list.innerHTML = rows.length ? rows.join('') : `<div class="empty-state">No chats to forward to yet.</div>`;
+  openModal('forwardModal');
+}
+
+function forwardMessage(targetType, targetId, messageId) {
+  const m = messagesData.get(messageId);
+  if (!m) return;
+  closeModal('forwardModal');
+
+  socket.emit('message:send', {
+    chatType: targetType,
+    chatId: targetId,
+    content: m.content,
+    messageType: m.message_type || 'text',
+    fileUrl: m.file_url,
+    fileName: m.file_name,
+    fileSize: m.file_size,
+  }, (ack) => {
+    if (ack.success) Toast.success('Message forwarded.');
+    else Toast.error(ack.message || 'Failed to forward message.');
+  });
+}
+
+async function openMessageInfo(messageId) {
+  const body = document.getElementById('msgInfoBody');
+  body.innerHTML = `<div class="empty-state">Loading...</div>`;
+  openModal('msgInfoModal');
+  try {
+    const res = await Api.get(`/api/messages/info/${messageId}`);
+    const info = res.info;
+    const fmtWho = (arr) => arr.length ? arr.map((r) => `${escapeHtml(r.name)} · ${formatClock(r.at)}`).join('<br>') : '—';
+    body.innerHTML = `
+      <div class="msginfo-row"><span class="msginfo-label">Sent</span><span>${formatClock(info.sentAt)}</span></div>
+      <div class="msginfo-row"><span class="msginfo-label">Delivered to</span><span style="text-align:right;">${fmtWho(info.delivered)}</span></div>
+      <div class="msginfo-row"><span class="msginfo-label">Seen by</span><span style="text-align:right;">${fmtWho(info.seen)}</span></div>
+      <div class="msginfo-row"><span class="msginfo-label">Edited</span><span>${info.isEdited ? 'Yes' : 'No'}</span></div>
+      <div class="msginfo-row"><span class="msginfo-label">Deleted</span><span>${info.isDeleted ? 'Yes' : 'No'}</span></div>
+      <div class="msginfo-row"><span class="msginfo-label">Encrypted</span><span>Transport (HTTPS/WSS)</span></div>
+    `;
+  } catch (err) {
+    body.innerHTML = `<div class="empty-state">Could not load message info.</div>`;
+  }
+}
+
+function requestDeleteForEveryone(messageId) {
+  if (!confirm('Delete this message for everyone?')) return;
+  socket.emit('message:delete', { messageId, chatType: activeChat.type, chatId: activeChat.id, forEveryone: true }, (ack) => {
+    if (!ack.success) Toast.error(ack.message || 'Failed to delete message.');
+  });
+}
+
+function requestDeleteForMe(messageId) {
+  const row = messagesRendered.get(messageId);
+  socket.emit('message:delete', { messageId, chatType: activeChat.type, chatId: activeChat.id, forEveryone: false }, (ack) => {
+    if (!ack.success) {
+      Toast.error(ack.message || 'Failed to delete message.');
+      return;
+    }
+    if (row) row.classList.add('msg-hiding');
+    showUndoSnackbar(messageId, row);
+  });
+}
+
+function showUndoSnackbar(messageId, row) {
+  if (pendingUndo) finalizePendingDelete();
+
+  const snackbar = document.getElementById('undoSnackbar');
+  snackbar.classList.remove('hidden');
+
+  pendingUndo = {
+    messageId,
+    timeoutId: setTimeout(() => {
+      snackbar.classList.add('hidden');
+      finalizePendingDelete();
+    }, 5000),
+  };
+
+  function finalizePendingDeleteLocal() {
+    if (row && row.parentNode) row.parentNode.removeChild(row);
+    messagesRendered.delete(messageId);
+    messagesData.delete(messageId);
+    pendingUndo = null;
+  }
+  pendingUndo.finalize = finalizePendingDeleteLocal;
+}
+
+function finalizePendingDelete() {
+  if (pendingUndo && pendingUndo.finalize) {
+    clearTimeout(pendingUndo.timeoutId);
+    pendingUndo.finalize();
+  }
+  document.getElementById('undoSnackbar').classList.add('hidden');
+  pendingUndo = null;
+}
+
+function undoDelete() {
+  if (!pendingUndo) return;
+  const { messageId, timeoutId } = pendingUndo;
+  clearTimeout(timeoutId);
+  document.getElementById('undoSnackbar').classList.add('hidden');
+  pendingUndo = null;
+
+  socket.emit('message:undoDelete', { messageId }, (ack) => {
+    if (ack.success) {
+      const row = messagesRendered.get(messageId);
+      if (row) row.classList.remove('msg-hiding');
+      Toast.success('Message restored.');
+    } else {
+      Toast.error(ack.message || 'Failed to undo.');
+    }
+  });
 }
 
 function onIncomingMessage(m) {
@@ -473,6 +728,7 @@ function onIncomingMessage(m) {
 }
 
 function onMessageEdited(m) {
+  messagesData.set(m.id, m);
   const row = messagesRendered.get(m.id);
   if (row) {
     const bubble = row.querySelector('.msg-bubble');
@@ -480,13 +736,27 @@ function onMessageEdited(m) {
   }
 }
 
-function onMessageDeleted({ messageId, message }) {
+function onMessageDeleted({ messageId, forEveryone, message }) {
   const row = messagesRendered.get(messageId);
-  if (row) {
-    const bubble = row.querySelector('.msg-bubble');
-    bubble.innerHTML = `<div class="msg-deleted">🚫 This message was deleted</div>`;
-    row.querySelectorAll('.msg-actions').forEach((el) => el.remove());
+
+  if (forEveryone) {
+    if (message) messagesData.set(messageId, message);
+    if (row) {
+      const bubble = row.querySelector('.msg-bubble');
+      bubble.innerHTML = renderMessageBody(message || { is_deleted: true, deleted_by: null });
+    }
+  } else {
+    // "Delete for me" - only ever broadcast to this user's own sockets/tabs.
+    // Soft-hide (collapsing animation); the initiating tab additionally
+    // manages the undo snackbar via requestDeleteForMe()'s own callback.
+    if (row) row.classList.add('msg-hiding');
   }
+}
+
+function onMessageRestored({ messageId }) {
+  if (pendingUndo && pendingUndo.messageId === messageId) return; // already handled by undoDelete()
+  const row = messagesRendered.get(messageId);
+  if (row) row.classList.remove('msg-hiding');
 }
 
 function onMessageStatus({ messageId, status }) {
@@ -541,13 +811,6 @@ function startEdit(messageId) {
 function cancelEdit() {
   editTarget = null;
   document.getElementById('editPreview').classList.add('hidden');
-}
-
-function deleteMessage(messageId, forEveryone) {
-  if (!confirm('Delete this message for everyone?')) return;
-  socket.emit('message:delete', { messageId, chatType: activeChat.type, chatId: activeChat.id, forEveryone }, (ack) => {
-    if (!ack.success) Toast.error(ack.message || 'Failed to delete message.');
-  });
 }
 
 function updateSendBtn() {
@@ -613,7 +876,7 @@ function onTypingUpdate({ chatType, chatId, userId, displayName, isTyping }) {
 function onPresenceUpdate({ userId, isOnline, lastSeen }) {
   onlineStatusCache.set(userId, { isOnline, lastSeen });
   if (activeChat && activeChat.type === 'private' && activeChat.otherUserId === userId) {
-    document.getElementById('chatHeaderSub').textContent = isOnline ? 'online' : (lastSeen ? 'last seen ' + timeAgo(lastSeen) : 'offline');
+    document.getElementById('chatHeaderSub').textContent = isOnline ? 'online' : (lastSeen ? 'Last seen ' + timeAgo(lastSeen) : 'offline');
   }
   loadConversations();
 }
@@ -840,7 +1103,7 @@ async function openInfoModal() {
             </div>
             <div style="flex:1;">
               <div style="font-weight:600;font-size:13.5px;">${escapeHtml(m.display_name)} ${m.id === me.id ? '(you)' : ''}</div>
-              <div style="font-size:11.5px;color:var(--text-secondary);">${m.role} · ${m.is_online ? 'online' : timeAgo(m.last_seen)}</div>
+              <div style="font-size:11.5px;color:var(--text-secondary);">${m.role} · ${m.is_online ? 'online' : 'Last seen ' + timeAgo(m.last_seen)}</div>
             </div>
           </div>`).join('')}
       </div>
@@ -881,6 +1144,10 @@ function bindGlobalUI() {
   });
 
   document.getElementById('profileForm').addEventListener('submit', saveProfile);
+  document.getElementById('msgContextMenu').addEventListener('click', (e) => {
+    const item = e.target.closest('.mcm-item');
+    if (item) handleMsgContextAction(item.dataset.action);
+  });
   document.getElementById('profileAvatarInput').addEventListener('change', (e) => {
     const file = e.target.files[0];
     handleProfileAvatarSelected(file);
@@ -963,7 +1230,7 @@ function bindGlobalUI() {
     if (activeChat && activeChat.type === 'private') {
       const status = onlineStatusCache.get(activeChat.otherUserId);
       if (status && !status.isOnline && status.lastSeen) {
-        document.getElementById('chatHeaderSub').textContent = 'last seen ' + timeAgo(status.lastSeen);
+        document.getElementById('chatHeaderSub').textContent = 'Last seen ' + timeAgo(status.lastSeen);
       }
     }
   }, 30000);

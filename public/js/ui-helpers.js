@@ -55,28 +55,44 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+const IST_TZ = 'Asia/Kolkata';
+
+// 'YYYY-MM-DD' for a date as it falls in India Standard Time, regardless of
+// the viewer's own device/browser timezone - used to compare calendar days.
+function istDateString(date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: IST_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+}
+
 function timeAgo(dateStr) {
   if (!dateStr) return '';
   const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
   if (diff < 60) return 'just now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
+  if (diff < 3600) {
+    const mins = Math.max(1, Math.floor(diff / 60));
+    return `${mins} min ago`;
+  }
+  if (diff < 86400) {
+    const hrs = Math.floor(diff / 3600);
+    return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+  }
+  const days = Math.floor(diff / 86400);
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+  return formatDateLabel(dateStr);
 }
 
+// "10:45 AM" - always rendered in IST, no matter where the viewer is.
 function formatClock(dateStr) {
   const d = new Date(dateStr);
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Intl.DateTimeFormat('en-US', { timeZone: IST_TZ, hour: 'numeric', minute: '2-digit', hour12: true }).format(d);
 }
 
 function formatDateLabel(dateStr) {
   const d = new Date(dateStr);
-  const today = new Date();
-  const yesterday = new Date();
-  yesterday.setDate(today.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-  return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+  const now = new Date();
+  const dStr = istDateString(d);
+  if (dStr === istDateString(now)) return 'Today';
+  if (dStr === istDateString(new Date(now.getTime() - 86400000))) return 'Yesterday';
+  return new Intl.DateTimeFormat('en-GB', { timeZone: IST_TZ, day: 'numeric', month: 'short', year: 'numeric' }).format(d);
 }
 
 function formatFileSize(bytes) {
