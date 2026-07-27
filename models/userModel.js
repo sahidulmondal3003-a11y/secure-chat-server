@@ -38,6 +38,29 @@ async function setOnlineStatus(userId, isOnline) {
   );
 }
 
+// Update nickname (display_name) and/or profile picture (avatar_url).
+// Pass null explicitly for avatarUrl to remove a picture; pass undefined
+// (i.e. omit the key) to leave a field untouched.
+async function updateProfile(userId, { displayName, avatarUrl } = {}) {
+  const sets = [];
+  const params = [];
+
+  if (displayName !== undefined) {
+    sets.push('display_name = ?');
+    params.push(displayName);
+  }
+  if (avatarUrl !== undefined) {
+    sets.push('avatar_url = ?');
+    params.push(avatarUrl);
+  }
+
+  if (sets.length === 0) return findUserById(userId);
+
+  params.push(userId);
+  await query(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, params);
+  return findUserById(userId);
+}
+
 async function searchUsers(term, excludeUserId, limit = 20) {
   limit = Math.max(1, Math.min(Number(limit) || 20, 100));
 
@@ -47,6 +70,7 @@ async function searchUsers(term, excludeUserId, limit = 20) {
       username,
       display_name,
       avatar_color,
+      avatar_url,
       is_online,
       last_seen
     FROM users
@@ -65,7 +89,7 @@ async function searchUsers(term, excludeUserId, limit = 20) {
 
 async function listAllUsers(limit = 100, offset = 0) {
   return query(
-    `SELECT id, username, display_name, role, is_online, last_seen, is_banned, banned_reason, created_at
+    `SELECT id, username, display_name, avatar_color, avatar_url, role, is_online, last_seen, is_banned, banned_reason, created_at
      FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     [limit, offset]
   );
@@ -90,6 +114,7 @@ module.exports = {
   findUserById,
   verifyPassword,
   setOnlineStatus,
+  updateProfile,
   searchUsers,
   listAllUsers,
   banUser,

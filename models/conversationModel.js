@@ -32,7 +32,7 @@ async function listUserConversations(userId) {
     `SELECT c.id, c.created_at,
             CASE WHEN c.user_one_id = ? THEN c.user_two_id ELSE c.user_one_id END as other_user_id,
             u.username as other_username, u.display_name as other_display_name,
-            u.avatar_color as other_avatar_color, u.is_online as other_is_online, u.last_seen as other_last_seen
+            u.avatar_color as other_avatar_color, u.avatar_url as other_avatar_url, u.is_online as other_is_online, u.last_seen as other_last_seen
      FROM conversations c
      JOIN users u ON u.id = CASE WHEN c.user_one_id = ? THEN c.user_two_id ELSE c.user_one_id END
      WHERE c.user_one_id = ? OR c.user_two_id = ?

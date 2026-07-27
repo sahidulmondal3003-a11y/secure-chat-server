@@ -53,7 +53,7 @@ async function isMember(groupId, userId) {
 
 async function listMembers(groupId) {
   return query(
-    `SELECT u.id, u.username, u.display_name, u.avatar_color, u.is_online, u.last_seen, gm.role, gm.joined_at
+    `SELECT u.id, u.username, u.display_name, u.avatar_color, u.avatar_url, u.is_online, u.last_seen, gm.role, gm.joined_at
      FROM group_members gm
      JOIN users u ON u.id = gm.user_id
      WHERE gm.group_id = ?

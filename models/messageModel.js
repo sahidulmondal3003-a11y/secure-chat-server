@@ -24,7 +24,7 @@ async function createMessage({
 
 async function getMessageById(id) {
   const rows = await query(
-    `SELECT m.*, u.username as sender_username, u.display_name as sender_display_name, u.avatar_color as sender_avatar_color,
+    `SELECT m.*, u.username as sender_username, u.display_name as sender_display_name, u.avatar_color as sender_avatar_color, u.avatar_url as sender_avatar_url,
             r.content as reply_content, r.sender_id as reply_sender_id, ru.display_name as reply_sender_name
      FROM messages m
      JOIN users u ON u.id = m.sender_id
@@ -38,7 +38,7 @@ async function getMessageById(id) {
 
 async function listMessages(chatType, chatId, { limit = 30, before = null } = {}) {
   let sql = `
-    SELECT m.*, u.username as sender_username, u.display_name as sender_display_name, u.avatar_color as sender_avatar_color,
+    SELECT m.*, u.username as sender_username, u.display_name as sender_display_name, u.avatar_color as sender_avatar_color, u.avatar_url as sender_avatar_url,
            r.content as reply_content, r.sender_id as reply_sender_id, ru.display_name as reply_sender_name
     FROM messages m
     JOIN users u ON u.id = m.sender_id
