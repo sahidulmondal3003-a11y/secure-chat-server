@@ -18,6 +18,7 @@ let conversationsCache = [];
 let groupsCache = [];
 let onlineStatusCache = new Map();
 let messagesRendered = new Map(); // messageId -> DOM element, for current open chat
+let pendingAvatarUrl; // undefined = no change staged, null = remove picture, string = newly uploaded url
 
 // ============================================================
 // BOOTSTRAP
@@ -33,9 +34,7 @@ async function bootstrap() {
 
   document.getElementById('meName').textContent = me.displayName;
   document.getElementById('meRole').textContent = me.role === 'admin' ? 'Administrator' : 'Online';
-  const meAvatar = document.getElementById('meAvatar');
-  meAvatar.style.background = me.avatarColor;
-  meAvatar.textContent = initials(me.displayName);
+  applyAvatar(document.getElementById('meAvatar'), { url: me.avatarUrl, color: me.avatarColor, name: me.displayName });
   if (me.role === 'admin') document.getElementById('adminLink').style.display = 'flex';
 
   requestNotificationPermission();
@@ -78,6 +77,73 @@ async function logout() {
   window.location.href = '/';
 }
 
+// ============================================================
+// MY PROFILE: nickname + profile picture
+// ============================================================
+function openProfileModal() {
+  document.getElementById('profileDisplayName').value = me.displayName;
+  document.getElementById('profileFormError').textContent = '';
+  pendingAvatarUrl = undefined;
+  applyAvatar(document.getElementById('profileAvatarPreview'), { url: me.avatarUrl, color: me.avatarColor, name: me.displayName });
+  document.getElementById('profileAvatarRemove').classList.toggle('hidden', !me.avatarUrl);
+  openModal('profileModal');
+}
+
+async function handleProfileAvatarSelected(file) {
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    Toast.error('Please choose an image file.');
+    return;
+  }
+  const maxMb = 8;
+  if (file.size > maxMb * 1024 * 1024) {
+    Toast.error(`Image too large. Max ${maxMb}MB.`);
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  Toast.info('Uploading picture...');
+  try {
+    const res = await Api.post('/api/uploads', formData);
+    pendingAvatarUrl = res.file.url;
+    applyAvatar(document.getElementById('profileAvatarPreview'), { url: pendingAvatarUrl, color: me.avatarColor, name: me.displayName });
+    document.getElementById('profileAvatarRemove').classList.remove('hidden');
+  } catch (err) {
+    Toast.error(err.data?.message || err.message || 'Upload failed.');
+  }
+}
+
+function removeProfileAvatar() {
+  pendingAvatarUrl = null;
+  applyAvatar(document.getElementById('profileAvatarPreview'), { url: null, color: me.avatarColor, name: me.displayName });
+  document.getElementById('profileAvatarRemove').classList.add('hidden');
+}
+
+async function saveProfile(e) {
+  e.preventDefault();
+  const errorEl = document.getElementById('profileFormError');
+  errorEl.textContent = '';
+
+  const displayName = document.getElementById('profileDisplayName').value.trim();
+  const body = { displayName };
+  if (pendingAvatarUrl !== undefined) body.avatarUrl = pendingAvatarUrl;
+
+  try {
+    const res = await Api.put('/api/users/me', body);
+    me = { ...me, ...res.user };
+    document.getElementById('meName').textContent = me.displayName;
+    applyAvatar(document.getElementById('meAvatar'), { url: me.avatarUrl, color: me.avatarColor, name: me.displayName });
+    closeModal('profileModal');
+    Toast.success('Profile updated.');
+    await loadConversations();
+    await loadGroups();
+  } catch (err) {
+    errorEl.textContent = err.data?.message || err.message || 'Failed to update profile.';
+  }
+}
+
 document.addEventListener('DOMContentLoaded', bootstrap);
 
 // ============================================================
@@ -113,8 +179,8 @@ function renderChatList(unreadMap = {}) {
     item.dataset.chatId = c.id;
     item.dataset.chatType = 'private';
     item.innerHTML = `
-      <div class="avatar" style="background:${c.other_avatar_color}">
-        ${initials(c.other_display_name)}
+      <div class="avatar" style="${avatarStyle(c.other_avatar_color, c.other_avatar_url)}">
+        ${avatarGlyph(c.other_avatar_url, c.other_display_name, false)}
         <span class="status-dot ${c.other_is_online ? 'online' : ''}"></span>
       </div>
       <div class="chat-item-body">
@@ -129,6 +195,7 @@ function renderChatList(unreadMap = {}) {
       name: c.other_display_name,
       sub: c.other_is_online ? 'online' : (c.other_last_seen ? 'last seen ' + timeAgo(c.other_last_seen) : 'offline'),
       avatarColor: c.other_avatar_color,
+      avatarUrl: c.other_avatar_url,
       otherUserId: c.other_user_id,
     });
     container.appendChild(item);
@@ -197,8 +264,12 @@ async function openChat(chatType, chatId, meta) {
   document.getElementById('activeChatArea').classList.remove('hidden');
   document.getElementById('activeChatArea').style.display = 'flex';
 
-  document.getElementById('chatHeaderAvatar').style.background = meta.avatarColor;
-  document.getElementById('chatHeaderAvatar').textContent = chatType === 'group' ? '👥' : initials(meta.name);
+  applyAvatar(document.getElementById('chatHeaderAvatar'), {
+    url: chatType === 'group' ? null : meta.avatarUrl,
+    color: meta.avatarColor,
+    name: meta.name,
+    isGroup: chatType === 'group',
+  });
   document.getElementById('chatHeaderName').textContent = meta.name;
   document.getElementById('chatHeaderSub').textContent = meta.sub || '';
 
@@ -650,7 +721,7 @@ function bindNewChatSearch() {
       resultsEl.innerHTML = res.users.length
         ? res.users.map((u) => `
           <div class="member-row" onclick="startPrivateChat('${u.id}')">
-            <div class="avatar sm" style="background:${u.avatar_color}">${initials(u.display_name)}</div>
+            <div class="avatar sm" style="${avatarStyle(u.avatar_color, u.avatar_url)}">${avatarGlyph(u.avatar_url, u.display_name, false)}</div>
             <div>
               <div style="font-weight:600;font-size:13.5px;">${escapeHtml(u.display_name)}</div>
               <div style="font-size:12px;color:var(--text-secondary);">@${escapeHtml(u.username)}</div>
@@ -671,6 +742,7 @@ async function startPrivateChat(userId) {
     name: ou.displayName,
     sub: ou.isOnline ? 'online' : 'offline',
     avatarColor: ou.avatarColor,
+    avatarUrl: ou.avatarUrl,
     otherUserId: ou.id,
   });
 }
@@ -746,7 +818,7 @@ async function openInfoModal() {
   if (activeChat.type === 'private') {
     body.innerHTML = `
       <div style="text-align:center;padding:10px 0 20px;">
-        <div class="avatar" style="width:76px;height:76px;font-size:26px;margin:0 auto 12px;background:${activeChat.avatarColor}">${initials(activeChat.name)}</div>
+        <div class="avatar" style="width:76px;height:76px;font-size:26px;margin:0 auto 12px;${avatarStyle(activeChat.avatarColor, activeChat.avatarUrl)}">${avatarGlyph(activeChat.avatarUrl, activeChat.name, false)}</div>
         <div style="font-weight:700;font-size:17px;">${escapeHtml(activeChat.name)}</div>
         <div style="color:var(--text-secondary);font-size:13px;margin-top:4px;">${escapeHtml(activeChat.sub)}</div>
       </div>`;
@@ -762,8 +834,8 @@ async function openInfoModal() {
       <div style="max-height:280px;overflow-y:auto;">
         ${res.members.map((m) => `
           <div class="member-row">
-            <div class="avatar sm" style="background:${m.avatar_color}">
-              ${initials(m.display_name)}
+            <div class="avatar sm" style="${avatarStyle(m.avatar_color, m.avatar_url)}">
+              ${avatarGlyph(m.avatar_url, m.display_name, false)}
               <span class="status-dot ${m.is_online ? 'online' : ''}"></span>
             </div>
             <div style="flex:1;">
@@ -806,6 +878,13 @@ function bindGlobalUI() {
     document.getElementById('newChatResults').innerHTML = '';
     switchNewTab('chat');
     openModal('newModal');
+  });
+
+  document.getElementById('profileForm').addEventListener('submit', saveProfile);
+  document.getElementById('profileAvatarInput').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    handleProfileAvatarSelected(file);
+    e.target.value = '';
   });
 
   const composer = document.getElementById('composerInput');

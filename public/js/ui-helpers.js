@@ -96,6 +96,36 @@ function initials(name) {
   return name.trim().slice(0, 2).toUpperCase();
 }
 
+// Inline style string for an .avatar element: shows the uploaded picture
+// (cropped to circle via CSS) when present, otherwise falls back to a
+// solid background color so the initials/emoji glyph stays readable.
+function avatarStyle(color, url) {
+  if (url) return `background-image:url('${escapeHtml(url)}');`;
+  return `background:${escapeHtml(color || '#6366f1')};`;
+}
+
+// Inner glyph (initials or group emoji) to show only when there's no
+// picture set — an <img>-backed avatar shouldn't also render initials text.
+function avatarGlyph(url, name, isGroup) {
+  if (url) return '';
+  return isGroup ? '👥' : escapeHtml(initials(name));
+}
+
+// Directly apply avatar (picture or color+glyph) to an existing DOM element,
+// for spots where the avatar isn't built from an HTML template string.
+function applyAvatar(el, { url, color, name, isGroup } = {}) {
+  if (!el) return;
+  if (url) {
+    el.style.backgroundImage = `url('${url}')`;
+    el.style.background = '';
+    el.textContent = '';
+  } else {
+    el.style.backgroundImage = '';
+    el.style.background = color || '#6366f1';
+    el.textContent = isGroup ? '👥' : initials(name);
+  }
+}
+
 function requestNotificationPermission() {
   if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission();
