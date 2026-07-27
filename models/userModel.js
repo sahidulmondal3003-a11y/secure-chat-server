@@ -108,6 +108,30 @@ async function countUsers() {
   return rows[0].total;
 }
 
+// Used only by the Super Admin "Registered Accounts" panel.
+// Deliberately excludes password_hash from the SELECT — credential
+// values (plaintext or hashed) are never returned to any client,
+// even an admin one. See adminController.registeredAccounts.
+async function listRegisteredAccounts({ search = '', sort = 'DESC', limit = 25, offset = 0 } = {}) {
+  limit = Math.max(1, Math.min(Number(limit) || 25, 200));
+  offset = Math.max(0, Number(offset) || 0);
+  const sortDir = String(sort).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+  const rows = await query(
+    `SELECT id, username, display_name, avatar_color, avatar_url,
+            role, is_online, last_seen, created_at
+     FROM users
+     WHERE username LIKE ?
+     ORDER BY created_at ${sortDir}
+     LIMIT ? OFFSET ?`,
+    [`%${search}%`, limit, offset]
+  );
+
+  const countRows = await query('SELECT COUNT(*) as total FROM users WHERE username LIKE ?', [`%${search}%`]);
+
+  return { rows, total: countRows[0].total };
+}
+
 module.exports = {
   createUser,
   findUserByUsername,
@@ -120,4 +144,5 @@ module.exports = {
   banUser,
   unbanUser,
   countUsers,
+  listRegisteredAccounts,
 };
