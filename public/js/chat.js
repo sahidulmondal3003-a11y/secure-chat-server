@@ -48,11 +48,58 @@ async function bootstrap() {
   bindGlobalUI();
 }
 
-function connectSocket() {
-  const token = localStorage.getItem('scs_access_token');
-  socket = io({ withCredentials: true, auth: { token } });
+let socketWasConnected = false;
 
-  socket.on('connect', () => console.log('[socket] connected'));
+function connectSocket() {
+  // Guard against duplicate connections if connectSocket is ever called twice.
+  if (socket) {
+    socket.removeAllListeners();
+    socket.disconnect();
+  }
+
+  const token = localStorage.getItem('scs_access_token');
+  socket = io({
+    withCredentials: true,
+    auth: { token },
+    transports: ['websocket', 'polling'], // fall back to polling if WS is blocked
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 10000,
+    randomizationFactor: 0.5, // jitter, avoids thundering-herd reconnects
+    timeout: 20000, // connection attempt timeout - tolerant of slow mobile links
+  });
+
+  socket.on('connect', () => {
+    console.log('[socket] connected');
+    if (socketWasConnected) {
+      // We were connected before and just recovered from a drop - restore
+      // session state without any page reload or functional change.
+      Toast.success('Back online.');
+      if (activeChat) {
+        socket.emit('chat:join', { chatType: activeChat.type, chatId: activeChat.id });
+        socket.emit('chat:seen', { chatType: activeChat.type, chatId: activeChat.id });
+      }
+      loadConversations();
+      loadGroups();
+    }
+    socketWasConnected = true;
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.warn('[socket] disconnected:', reason);
+    if (reason === 'io server disconnect') {
+      // Server explicitly kicked the socket (e.g. banned) - manual reconnect only.
+      socket.connect();
+    } else {
+      Toast.info('Reconnecting...');
+    }
+  });
+
+  socket.on('reconnect_attempt', (attempt) => {
+    console.log('[socket] reconnect attempt', attempt);
+  });
+
   socket.on('connect_error', (err) => {
     console.error('[socket] connect error', err.message);
     if (err.message.includes('Authentication') || err.message.includes('token')) {
@@ -72,6 +119,19 @@ function connectSocket() {
   socket.on('group:member-joined', () => loadGroups());
   socket.on('group:member-left', () => loadGroups());
 }
+
+// Nudge the socket to reconnect immediately when the browser regains
+// connectivity (e.g. Wi-Fi <-> mobile data handoff) instead of waiting for
+// the next backoff tick.
+window.addEventListener('online', () => {
+  if (socket && !socket.connected) {
+    Toast.info('Network restored, reconnecting...');
+    socket.connect();
+  }
+});
+window.addEventListener('offline', () => {
+  Toast.error('No internet connection.');
+});
 
 async function logout() {
   try {
