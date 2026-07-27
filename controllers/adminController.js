@@ -106,7 +106,7 @@ async function groupMessages(req, res, next) {
   try {
     const { groupId } = req.params;
     const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
-    const messages = await messageModel.listMessages('group', groupId, { limit });
+    const messages = await messageModel.listMessages('group', groupId, null, { limit });
     res.json({ success: true, messages });
   } catch (err) {
     next(err);

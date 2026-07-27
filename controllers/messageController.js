@@ -31,10 +31,38 @@ async function history(req, res, next) {
     const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
     const before = req.query.before || null;
 
-    const messages = await messageModel.listMessages(chatType, chatId, { limit, before });
+    const messages = await messageModel.listMessages(chatType, chatId, req.user.id, { limit, before });
     await resetUnread(req.user.id, chatType, chatId);
 
     res.json({ success: true, messages });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function messageInfo(req, res, next) {
+  try {
+    const { messageId } = req.params;
+    const message = await messageModel.getMessageById(messageId);
+    if (!message) {
+      const err = new Error('Message not found.');
+      err.statusCode = 404;
+      throw err;
+    }
+    await assertAccess(req, message.chat_type, message.chat_id);
+
+    const receipts = await messageModel.getMessageReceipts(messageId);
+    res.json({
+      success: true,
+      info: {
+        sentAt: message.created_at,
+        isEdited: !!message.is_edited,
+        isDeleted: !!message.is_deleted,
+        deletedAt: message.deleted_at,
+        delivered: receipts.filter((r) => r.delivered_at).map((r) => ({ userId: r.user_id, name: r.display_name, at: r.delivered_at })),
+        seen: receipts.filter((r) => r.seen_at).map((r) => ({ userId: r.user_id, name: r.display_name, at: r.seen_at })),
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -55,4 +83,4 @@ async function search(req, res, next) {
   }
 }
 
-module.exports = { history, search, assertAccess };
+module.exports = { history, search, messageInfo, assertAccess };
