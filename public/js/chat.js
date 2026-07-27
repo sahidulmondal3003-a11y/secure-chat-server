@@ -174,12 +174,22 @@ function markActiveInList(chatId) {
 // ============================================================
 // OPEN A CHAT
 // ============================================================
+let chatHistoryPushed = false; // tracks whether we've pushed a history entry for the open chat view
+
 async function openChat(chatType, chatId, meta) {
   if (activeChat) {
     socket.emit('chat:leave', { chatType: activeChat.type, chatId: activeChat.id });
   }
   activeChat = { type: chatType, id: chatId, ...meta };
   markActiveInList(chatId);
+
+  // Push a history entry the first time we enter chat view, so the browser/
+  // hardware back button (and mobile swipe-back gesture) closes the chat
+  // instead of leaving the app.
+  if (!chatHistoryPushed) {
+    history.pushState({ scsChatOpen: true }, '');
+    chatHistoryPushed = true;
+  }
 
   document.getElementById('chatApp').classList.remove('view-list');
   document.getElementById('chatApp').classList.add('view-chat');
@@ -227,10 +237,49 @@ async function openChat(chatType, chatId, meta) {
   }
 }
 
-function backToList() {
+// Actually reverts the UI from chat view back to the list. Does NOT touch
+// browser history itself — call backToList()/exitChat() instead if the
+// action originates from a user click, so history stays in sync.
+function closeChatView() {
   document.getElementById('chatApp').classList.remove('view-chat');
   document.getElementById('chatApp').classList.add('view-list');
+  markActiveInList(null);
 }
+
+// Exit the currently open chat and return to the chat list.
+// If we pushed a history entry when opening the chat, go back through it
+// (this fires the popstate handler below, which does the actual UI revert).
+// Otherwise (e.g. no history entry yet) just revert the UI directly.
+function backToList() {
+  if (chatHistoryPushed && history.state && history.state.scsChatOpen) {
+    history.back();
+  } else {
+    closeChatView();
+  }
+}
+
+// Alias with a clearer name for the "exit chat" action.
+function exitChat() {
+  backToList();
+}
+
+// Hardware/browser back button (and swipe-back gestures on mobile) should
+// close an open chat instead of navigating away from the app or exiting.
+window.addEventListener('popstate', () => {
+  chatHistoryPushed = false;
+  if (document.getElementById('chatApp').classList.contains('view-chat')) {
+    closeChatView();
+  }
+});
+
+// Desktop convenience: Escape key exits the open chat too.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('chatApp').classList.contains('view-chat')) {
+    const activeModal = document.querySelector('.modal-overlay:not(.hidden)');
+    if (activeModal) return; // let modal close logic handle Escape first
+    backToList();
+  }
+});
 
 function appendDateSeparator(label) {
   const div = document.createElement('div');
