@@ -113,6 +113,39 @@ async function groupMessages(req, res, next) {
   }
 }
 
+// Powers the "Registered Accounts" panel. Note: this intentionally never
+// includes password or password-hash values in the response. Even
+// bcrypt hashes are sensitive (offline cracking, credential-stuffing
+// risk if this endpoint or an export ever leaked), so instead of a
+// real value we return a fixed "Protected" status per user.
+async function registeredAccounts(req, res, next) {
+  try {
+    const search = (req.query.search || '').toString();
+    const sort = (req.query.sort || 'DESC').toString();
+    const limit = Math.min(parseInt(req.query.limit, 10) || 25, 200);
+    const offset = parseInt(req.query.offset, 10) || 0;
+
+    const { rows, total } = await userModel.listRegisteredAccounts({ search, sort, limit, offset });
+
+    const accounts = rows.map((u) => ({
+      id: u.id,
+      username: u.username,
+      displayName: u.display_name,
+      avatarUrl: u.avatar_url,
+      avatarColor: u.avatar_color,
+      role: u.role,
+      isOnline: !!u.is_online,
+      lastSeen: u.last_seen,
+      registeredAt: u.created_at,
+      passwordStatus: 'Protected',
+    }));
+
+    res.json({ success: true, accounts, total, limit, offset });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   stats,
   listUsers,
@@ -123,4 +156,5 @@ module.exports = {
   deleteConversation,
   logs,
   groupMessages,
+  registeredAccounts,
 };
