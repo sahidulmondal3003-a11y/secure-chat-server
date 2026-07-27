@@ -36,7 +36,7 @@ async function getMessageById(id) {
   return rows[0] || null;
 }
 
-async function listMessages(chatType, chatId, { limit = 30, before = null } = {}) {
+async function listMessages(chatType, chatId, viewerUserId, { limit = 30, before = null } = {}) {
   let sql = `
     SELECT m.*, u.username as sender_username, u.display_name as sender_display_name, u.avatar_color as sender_avatar_color, u.avatar_url as sender_avatar_url,
            r.content as reply_content, r.sender_id as reply_sender_id, ru.display_name as reply_sender_name
@@ -44,9 +44,10 @@ async function listMessages(chatType, chatId, { limit = 30, before = null } = {}
     JOIN users u ON u.id = m.sender_id
     LEFT JOIN messages r ON r.id = m.reply_to_id
     LEFT JOIN users ru ON ru.id = r.sender_id
-    WHERE m.chat_type = ? AND m.chat_id = ?`;
+    LEFT JOIN message_deletions md ON md.message_id = m.id AND md.user_id = ?
+    WHERE m.chat_type = ? AND m.chat_id = ? AND md.id IS NULL`;
 
-  const params = [chatType, chatId];
+  const params = [viewerUserId, chatType, chatId];
 
   if (before) {
     sql += ' AND m.created_at < ?';
@@ -69,13 +70,34 @@ async function editMessage(messageId, senderId, newContent) {
   return getMessageById(messageId);
 }
 
+// Server-verified: only the original sender (or an admin) may delete for
+// everyone. Never trust a client-supplied "isSender" flag - the WHERE
+// clause below enforces ownership at the database level.
 async function deleteMessageForEveryone(messageId, requesterId, isAdmin = false) {
   const sql = isAdmin
-    ? `UPDATE messages SET is_deleted = 1, deleted_for_everyone = 1, content = NULL, file_url = NULL WHERE id = ?`
-    : `UPDATE messages SET is_deleted = 1, deleted_for_everyone = 1, content = NULL, file_url = NULL WHERE id = ? AND sender_id = ?`;
-  const params = isAdmin ? [messageId] : [messageId, requesterId];
-  await query(sql, params);
+    ? `UPDATE messages SET is_deleted = 1, deleted_for_everyone = 1, deleted_by = ?, deleted_at = NOW(), content = NULL, file_url = NULL WHERE id = ?`
+    : `UPDATE messages SET is_deleted = 1, deleted_for_everyone = 1, deleted_by = ?, deleted_at = NOW(), content = NULL, file_url = NULL WHERE id = ? AND sender_id = ?`;
+  const params = isAdmin ? [requesterId, messageId] : [requesterId, messageId, requesterId];
+  const result = await query(sql, params);
+  if (!isAdmin && result.affectedRows === 0) {
+    const err = new Error('Only the sender can delete this message for everyone.');
+    err.statusCode = 403;
+    throw err;
+  }
   return getMessageById(messageId);
+}
+
+// "Delete for me": hides the message only for this user; everyone else
+// still sees it untouched. Recorded so it stays hidden across reloads.
+async function deleteMessageForMe(messageId, userId) {
+  await query(
+    `INSERT IGNORE INTO message_deletions (id, message_id, user_id) VALUES (?, ?, ?)`,
+    [newId(), messageId, userId]
+  );
+}
+
+async function undoDeleteForMe(messageId, userId) {
+  await query(`DELETE FROM message_deletions WHERE message_id = ? AND user_id = ?`, [messageId, userId]);
 }
 
 async function markDelivered(messageId, userId) {
@@ -136,6 +158,15 @@ async function countMessages() {
   return rows[0].total;
 }
 
+async function getMessageReceipts(messageId) {
+  return query(
+    `SELECT mr.*, u.display_name FROM message_receipts mr
+     JOIN users u ON u.id = mr.user_id
+     WHERE mr.message_id = ?`,
+    [messageId]
+  );
+}
+
 async function deleteAllMessagesForChat(chatType, chatId) {
   await query('DELETE FROM messages WHERE chat_type = ? AND chat_id = ?', [chatType, chatId]);
 }
@@ -146,6 +177,9 @@ module.exports = {
   listMessages,
   editMessage,
   deleteMessageForEveryone,
+  deleteMessageForMe,
+  undoDeleteForMe,
+  getMessageReceipts,
   markDelivered,
   markSeen,
   markAllSeenInChat,
