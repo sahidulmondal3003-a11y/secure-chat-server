@@ -184,6 +184,7 @@ async function openChat(chatType, chatId, meta) {
   document.getElementById('chatApp').classList.remove('view-list');
   document.getElementById('chatApp').classList.add('view-chat');
   document.getElementById('welcomePane').style.display = 'none';
+  document.getElementById('activeChatArea').classList.remove('hidden');
   document.getElementById('activeChatArea').style.display = 'flex';
 
   document.getElementById('chatHeaderAvatar').style.background = meta.avatarColor;
@@ -737,6 +738,7 @@ async function leaveCurrentGroup() {
   backToList();
   activeChat = null;
   document.getElementById('welcomePane').style.display = 'flex';
+  document.getElementById('activeChatArea').classList.add('hidden');
   document.getElementById('activeChatArea').style.display = 'none';
   await loadGroups();
 }
