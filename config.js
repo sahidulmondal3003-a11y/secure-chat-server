@@ -70,6 +70,25 @@ const config = {
   group: {
     maxMembers: parseInt(required('MAX_GROUP_MEMBERS', '100000'), 10),
   },
+
+  // Network / reverse-proxy tuning (Railway, Render, Nginx, Cloudflare, etc.)
+  // These do not change any application behaviour - only how the server
+  // interprets client IPs/protocol and whether it redirects to HTTPS.
+  network: {
+    // Number of hops to trust for X-Forwarded-* headers (Railway/Render = 1).
+    // Accepts a number, "true"/"false", or a comma-separated list of IPs/CIDRs.
+    trustProxy: (() => {
+      const val = required('TRUST_PROXY', '1');
+      if (val === 'true') return true;
+      if (val === 'false') return false;
+      const n = Number(val);
+      return Number.isNaN(n) ? val : n;
+    })(),
+    // Redirect HTTP -> HTTPS when the server can tell (via X-Forwarded-Proto)
+    // that the original request was plain HTTP. Safe to leave on even for
+    // local dev since it only triggers when that header says "http".
+    forceHttps: required('FORCE_HTTPS', required('NODE_ENV', 'development') === 'production' ? 'true' : 'false') === 'true',
+  },
 };
 
 module.exports = config;
