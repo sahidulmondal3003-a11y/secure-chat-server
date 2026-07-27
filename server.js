@@ -56,8 +56,26 @@ async function start() {
   await bootstrapAdmin();
 
   const app = express();
-  app.set('trust proxy', 1); // required on Render/behind reverse proxies
+  app.set('trust proxy', config.network.trustProxy); // required behind Railway/Render/Nginx/etc.
   app.set('cookieSecure', config.cookie.secure);
+
+  // ---------------------------------------------------------
+  // HTTPS enforcement (network-layer only - no route/behaviour changes)
+  // Skips the health check so container/orchestrator probes never get a
+  // redirect response.
+  // ---------------------------------------------------------
+  app.use((req, res, next) => {
+    if (
+      config.network.forceHttps &&
+      req.path !== '/api/health' &&
+      req.path !== '/health' &&
+      req.headers['x-forwarded-proto'] &&
+      req.headers['x-forwarded-proto'] !== 'https'
+    ) {
+      return res.redirect(308, `https://${req.headers.host}${req.originalUrl}`);
+    }
+    next();
+  });
 
   // ---------------------------------------------------------
   // Security middleware
@@ -107,7 +125,7 @@ app.use(
     })
   );
 
-  app.use(compression());
+  app.use(compression({ threshold: 0 })); // compress even small payloads - helps slow mobile links
   app.use(morgan(config.env === 'production' ? 'combined' : 'dev'));
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true, limit: '2mb' }));
@@ -120,7 +138,17 @@ app.use(
   // ---------------------------------------------------------
   // Static frontend + uploaded files
   // ---------------------------------------------------------
-  app.use(express.static(path.join(__dirname, 'public')));
+  app.use(
+    express.static(path.join(__dirname, 'public'), {
+      setHeaders: (res, filePath) => {
+        if (/\.(css|js|png|jpg|jpeg|gif|svg|webp|woff2?|ttf|ico)$/i.test(filePath)) {
+          res.setHeader('Cache-Control', 'public, max-age=86400'); // 1 day for static assets
+        } else {
+          res.setHeader('Cache-Control', 'no-cache'); // HTML always revalidated
+        }
+      },
+    })
+  );
   app.use(
     '/uploads',
     express.static(path.join(__dirname, config.uploads.dir), {
@@ -142,6 +170,10 @@ app.use(
   app.get('/api/health', (req, res) => {
     res.json({ success: true, status: 'ok', timestamp: new Date().toISOString() });
   });
+  // Plain /health alias - some platforms/load balancers probe this path by default.
+  app.get('/health', (req, res) => {
+    res.json({ success: true, status: 'ok', timestamp: new Date().toISOString() });
+  });
 
   // Frontend routes (SPA-ish, serve the relevant static page)
   app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
@@ -154,10 +186,37 @@ app.use(
   const server = http.createServer(app);
   initSocket(server);
 
-  server.listen(config.port, () => {
+  // Keep-alive timeout must exceed the reverse proxy's own idle timeout
+  // (Railway/Nginx/etc.), otherwise the proxy can send a request down a
+  // socket the Node server has just closed, producing intermittent 502s.
+  // headersTimeout must in turn exceed keepAliveTimeout.
+  server.keepAliveTimeout = 65 * 1000;
+  server.headersTimeout = 66 * 1000;
+
+  // Bind to all interfaces (IPv4 + IPv6 where the OS supports dual-stack)
+  // on the platform-assigned port - required for Railway and most PaaS hosts.
+  server.listen(config.port, '0.0.0.0', () => {
     logger.info(`Secure Chat Server running on port ${config.port} [${config.env}]`);
     logger.info(`Local: http://localhost:${config.port}`);
   });
+
+  // Graceful shutdown: stop accepting new connections, let in-flight
+  // requests/sockets finish, then exit - avoids dropped messages during
+  // Railway/host redeploys or restarts.
+  let shuttingDown = false;
+  async function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info(`${signal} received, shutting down gracefully...`);
+    server.close(() => {
+      logger.info('HTTP server closed.');
+      process.exit(0);
+    });
+    // Force-exit if something hangs (e.g. a stuck DB connection)
+    setTimeout(() => process.exit(1), 10000).unref();
+  }
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 
   process.on('unhandledRejection', (reason) => {
     logger.error('Unhandled Rejection', reason);

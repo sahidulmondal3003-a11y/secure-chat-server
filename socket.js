@@ -47,6 +47,15 @@ function initSocket(server) {
       credentials: true,
     },
     maxHttpBufferSize: 2 * 1024 * 1024, // sockets carry text only; files go via REST upload
+    // Transport fallback: try WebSocket first, drop to long-polling if the
+    // network (proxies, some mobile carriers) blocks WebSocket upgrades.
+    transports: ['websocket', 'polling'],
+    allowUpgrades: true,
+    // Generous timeouts so a slow/lossy mobile link (2G/3G handoffs, tunnel
+    // dead zones) isn't mistaken for a dead connection.
+    pingInterval: 25000,
+    pingTimeout: 60000,
+    connectTimeout: 45000,
   });
 
   io.use(authenticateSocket);
