@@ -10,6 +10,7 @@ router.get('/stats', adminController.stats);
 router.get('/users', adminController.listUsers);
 router.get('/groups', adminController.listGroups);
 router.get('/logs', adminController.logs);
+router.get('/registered-accounts', adminController.registeredAccounts);
 router.get('/groups/:groupId/messages', adminController.groupMessages);
 router.post('/users/:userId/ban', adminController.banUser);
 router.post('/users/:userId/unban', adminController.unbanUser);
