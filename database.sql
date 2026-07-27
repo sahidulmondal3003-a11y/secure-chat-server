@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `password_hash` VARCHAR(255) NOT NULL,
   `display_name` VARCHAR(64) NOT NULL,
   `avatar_color` VARCHAR(16) DEFAULT '#6366f1',
+  `avatar_url` VARCHAR(255) NULL,
   `role` ENUM('user', 'admin') NOT NULL DEFAULT 'user',
   `is_online` TINYINT(1) NOT NULL DEFAULT 0,
   `last_seen` DATETIME NULL,
@@ -28,6 +29,10 @@ CREATE TABLE IF NOT EXISTS `users` (
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_username (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Migration for existing installs where the table already existed
+-- without avatar_url (safe to fail/skip if the column is already there).
+ALTER TABLE `users` ADD COLUMN `avatar_url` VARCHAR(255) NULL AFTER `avatar_color`;
 
 -- ------------------------------------------------------------
 -- Private conversations (1:1)
