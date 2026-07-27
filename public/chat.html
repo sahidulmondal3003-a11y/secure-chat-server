@@ -15,7 +15,7 @@
   <!-- ============ SIDEBAR ============ -->
   <aside class="sidebar glass" id="sidebar" style="position:relative;">
     <div class="sidebar-header">
-      <div class="me-info">
+      <div class="me-info" id="meInfo" onclick="openProfileModal()" title="Edit profile">
         <div class="avatar" id="meAvatar"></div>
         <div>
           <div class="me-name" id="meName">—</div>
@@ -181,6 +181,34 @@
       <button class="btn-icon" onclick="closeModal('infoModal')">✕</button>
     </div>
     <div id="infoModalBody"></div>
+  </div>
+</div>
+
+<!-- ============ MODAL: My Profile (nickname + picture) ============ -->
+<div class="modal-overlay hidden" id="profileModal">
+  <div class="modal-box glass">
+    <div class="modal-title">
+      <span>Edit Profile</span>
+      <button class="btn-icon" onclick="closeModal('profileModal')">✕</button>
+    </div>
+
+    <div class="profile-avatar-edit">
+      <div class="profile-avatar-wrap">
+        <div class="avatar" id="profileAvatarPreview"></div>
+        <div class="profile-avatar-edit-btn" onclick="document.getElementById('profileAvatarInput').click()" title="Change picture">📷</div>
+      </div>
+      <input type="file" id="profileAvatarInput" accept="image/*" class="hidden">
+      <span class="profile-avatar-remove hidden" id="profileAvatarRemove" onclick="removeProfileAvatar()">Remove picture</span>
+    </div>
+
+    <form id="profileForm">
+      <div class="field">
+        <label>Nickname</label>
+        <div class="input-wrap"><span class="icon">✏️</span><input type="text" id="profileDisplayName" required minlength="1" maxlength="64" placeholder="Your display name"></div>
+      </div>
+      <div class="error-text" id="profileFormError"></div>
+      <button type="submit" class="btn btn-primary" style="width:100%">Save Changes</button>
+    </form>
   </div>
 </div>
 
