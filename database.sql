@@ -93,6 +93,8 @@ CREATE TABLE IF NOT EXISTS `messages` (
   `is_edited` TINYINT(1) NOT NULL DEFAULT 0,
   `is_deleted` TINYINT(1) NOT NULL DEFAULT 0,
   `deleted_for_everyone` TINYINT(1) NOT NULL DEFAULT 0,
+  `deleted_by` VARCHAR(36) NULL,
+  `deleted_at` DATETIME NULL,
   `status` ENUM('sent', 'delivered', 'seen') NOT NULL DEFAULT 'sent',
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -101,6 +103,24 @@ CREATE TABLE IF NOT EXISTS `messages` (
   FULLTEXT INDEX idx_content_search (`content`),
   FOREIGN KEY (`sender_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
   FOREIGN KEY (`reply_to_id`) REFERENCES `messages`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Migration for existing installs (safe to fail/skip if columns already exist)
+ALTER TABLE `messages` ADD COLUMN `deleted_by` VARCHAR(36) NULL AFTER `deleted_for_everyone`;
+ALTER TABLE `messages` ADD COLUMN `deleted_at` DATETIME NULL AFTER `deleted_by`;
+
+-- ------------------------------------------------------------
+-- Per-user "delete for me" tracking (message stays intact for
+-- everyone else; just hidden for the user who deleted it locally)
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `message_deletions` (
+  `id` VARCHAR(36) NOT NULL PRIMARY KEY,
+  `message_id` VARCHAR(36) NOT NULL,
+  `user_id` VARCHAR(36) NOT NULL,
+  `deleted_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_message_user (`message_id`, `user_id`),
+  FOREIGN KEY (`message_id`) REFERENCES `messages`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ------------------------------------------------------------

@@ -4,6 +4,13 @@
  * Boots Express (REST API + static frontend), Socket.IO (real-time layer),
  * and MySQL (auto-creates database/tables on first run).
  */
+
+// Force all server-side Date handling (Node's Date object, and how the MySQL
+// driver interprets naive DATETIME values coming back from the DB) to
+// Asia/Kolkata, so timestamps are consistent no matter what timezone the
+// host OS is actually running in. Must run before anything else touches Date.
+process.env.TZ = 'Asia/Kolkata';
+
 const http = require('http');
 const path = require('path');
 const express = require('express');

@@ -211,18 +211,34 @@ function initSocket(server) {
     socket.on('message:delete', async ({ messageId, chatType, chatId, forEveryone }, ack) => {
       try {
         if (forEveryone) {
+          // Ownership is verified inside the model (WHERE sender_id = ? unless
+          // admin) - never trust the client's claim that it's allowed.
           const isAdmin = user.role === 'admin';
           const updated = await messageModel.deleteMessageForEveryone(messageId, user.id, isAdmin);
           io.to(roomName(chatType, chatId)).emit('message:deleted', { messageId, forEveryone: true, message: updated });
         } else {
-          // "Delete for me" is a client-side-only concept for this lightweight
-          // implementation - we simply acknowledge; the client hides it locally.
-          socket.emit('message:deleted', { messageId, forEveryone: false });
+          // "Delete for me" is persisted per-user so it stays hidden across
+          // reloads/devices, without affecting what anyone else sees.
+          await messageModel.deleteMessageForMe(messageId, user.id);
+          io.to(`user:${user.id}`).emit('message:deleted', { messageId, forEveryone: false });
         }
         if (ack) ack({ success: true });
       } catch (err) {
         logger.error('message:delete error', err.message);
-        if (ack) ack({ success: false, message: 'Failed to delete message.' });
+        if (ack) ack({ success: false, message: err.statusCode === 403 ? err.message : 'Failed to delete message.' });
+      }
+    });
+
+    // Undo a "delete for me" within the client's undo window.
+    socket.on('message:undoDelete', async ({ messageId }, ack) => {
+      try {
+        await messageModel.undoDeleteForMe(messageId, user.id);
+        const message = await messageModel.getMessageById(messageId);
+        io.to(`user:${user.id}`).emit('message:restored', { messageId, message });
+        if (ack) ack({ success: true });
+      } catch (err) {
+        logger.error('message:undoDelete error', err.message);
+        if (ack) ack({ success: false, message: 'Failed to undo delete.' });
       }
     });
 
