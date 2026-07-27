@@ -58,6 +58,7 @@ async function register(req, res, next) {
         displayName: user.display_name,
         role: user.role,
         avatarColor: user.avatar_color,
+        avatarUrl: user.avatar_url,
       },
       accessToken,
     });
@@ -110,6 +111,7 @@ async function login(req, res, next) {
         displayName: user.display_name,
         role: user.role,
         avatarColor: user.avatar_color,
+        avatarUrl: user.avatar_url,
       },
       accessToken,
     });
@@ -170,6 +172,7 @@ async function me(req, res) {
       displayName: req.user.display_name,
       role: req.user.role,
       avatarColor: req.user.avatar_color,
+      avatarUrl: req.user.avatar_url,
     },
   });
 }

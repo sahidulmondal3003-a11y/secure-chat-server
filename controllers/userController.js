@@ -1,7 +1,7 @@
 const userModel = require('../models/userModel');
 const conversationModel = require('../models/conversationModel');
-const { getUnreadCounts } = require('../models/logModel');
-const { sanitize } = require('../utils/helpers');
+const { getUnreadCounts, logActivity } = require('../models/logModel');
+const { sanitize, isValidDisplayName } = require('../utils/helpers');
 
 async function search(req, res, next) {
   try {
@@ -42,6 +42,7 @@ async function startConversation(req, res, next) {
           username: target.username,
           displayName: target.display_name,
           avatarColor: target.avatar_color,
+          avatarUrl: target.avatar_url,
           isOnline: !!target.is_online,
           lastSeen: target.last_seen,
         },
@@ -52,4 +53,50 @@ async function startConversation(req, res, next) {
   }
 }
 
-module.exports = { search, listConversations, startConversation };
+async function updateProfile(req, res, next) {
+  try {
+    const updates = {};
+
+    if (req.body.displayName !== undefined) {
+      const displayName = sanitize((req.body.displayName || '').trim());
+      if (!isValidDisplayName(displayName)) {
+        return res.status(422).json({ success: false, message: 'Nickname must be 1-64 characters.' });
+      }
+      updates.displayName = displayName;
+    }
+
+    if (req.body.avatarUrl !== undefined) {
+      // Allow clearing the picture with null/empty string, or setting a new
+      // uploaded file's URL (must point at our own /uploads/images path).
+      const avatarUrl = req.body.avatarUrl ? sanitize(String(req.body.avatarUrl).trim()) : null;
+      if (avatarUrl && !/^\/uploads\/images\//.test(avatarUrl)) {
+        return res.status(422).json({ success: false, message: 'Invalid avatar file.' });
+      }
+      updates.avatarUrl = avatarUrl;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(422).json({ success: false, message: 'Nothing to update.' });
+    }
+
+    const updated = await userModel.updateProfile(req.user.id, updates);
+    await logActivity(req.user.id, 'profile_update', updates, req.ip);
+
+    res.json({
+      success: true,
+      message: 'Profile updated.',
+      user: {
+        id: updated.id,
+        username: updated.username,
+        displayName: updated.display_name,
+        role: updated.role,
+        avatarColor: updated.avatar_color,
+        avatarUrl: updated.avatar_url,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { search, listConversations, startConversation, updateProfile };
