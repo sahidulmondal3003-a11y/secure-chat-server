@@ -44,6 +44,11 @@ function isValidPassword(password) {
   return typeof password === 'string' && password.length >= 6 && password.length <= 128;
 }
 
+/** Nickname / display name validation: 1-64 chars after trimming, no restriction on charset (sanitized separately) */
+function isValidDisplayName(name) {
+  return typeof name === 'string' && name.trim().length >= 1 && name.trim().length <= 64;
+}
+
 function paginationParams(query) {
   const limit = Math.min(parseInt(query.limit, 10) || 30, 100);
   const before = query.before || null; // ISO date cursor
@@ -57,5 +62,6 @@ module.exports = {
   colorFromSeed,
   isValidUsername,
   isValidPassword,
+  isValidDisplayName,
   paginationParams,
 };
