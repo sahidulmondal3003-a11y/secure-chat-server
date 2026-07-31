@@ -1037,6 +1037,49 @@ function bindFloatingButtonRipples() {
   });
 }
 
+// ============================================================
+// MOBILE KEYBOARD FIX
+// On iOS/Android, the on-screen keyboard overlays the page instead of
+// resizing the layout viewport, so a plain height:100% column can end
+// up with its last child (the composer) hidden behind the keyboard.
+// window.visualViewport reports the REAL visible area, so we mirror
+// that onto the app shell's height. Only active below the 992px
+// mobile breakpoint; desktop is left completely alone.
+// ============================================================
+function bindMobileKeyboardFix() {
+  if (!window.visualViewport) return;
+  const appEl = document.getElementById('chatApp');
+  const mq = window.matchMedia('(max-width: 992px)');
+
+  function applyViewportHeight() {
+    if (!mq.matches) {
+      appEl.style.height = '';
+      return;
+    }
+    appEl.style.height = window.visualViewport.height + 'px';
+    // Keep the page itself from scrolling under the fixed-height shell
+    // (some Android keyboards nudge document scroll on focus).
+    window.scrollTo(0, 0);
+  }
+
+  window.visualViewport.addEventListener('resize', applyViewportHeight);
+  window.visualViewport.addEventListener('scroll', applyViewportHeight);
+  mq.addEventListener ? mq.addEventListener('change', applyViewportHeight) : mq.addListener(applyViewportHeight);
+
+  // Re-pin scroll to the latest message whenever the keyboard opens,
+  // so the user doesn't lose their place in the conversation.
+  document.getElementById('composerInput').addEventListener('focus', () => {
+    if (!mq.matches) return;
+    setTimeout(() => {
+      applyViewportHeight();
+      const area = document.getElementById('messagesArea');
+      if (area) area.scrollTop = area.scrollHeight;
+    }, 250);
+  });
+
+  applyViewportHeight();
+}
+
 async function handleFileSelected(file) {
   if (!file || !activeChat) return;
   const maxMb = 50;
@@ -1553,6 +1596,7 @@ function bindGlobalUI() {
   bindSidebarSearch();
   bindMsgSearch();
   bindFloatingButtonRipples();
+  bindMobileKeyboardFix();
 
   document.getElementById('fabNew').addEventListener('click', () => {
     document.getElementById('newChatSearch').value = '';
