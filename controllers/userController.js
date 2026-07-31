@@ -1,5 +1,6 @@
 const userModel = require('../models/userModel');
 const conversationModel = require('../models/conversationModel');
+const groupModel = require('../models/groupModel');
 const { getUnreadCounts, logActivity } = require('../models/logModel');
 const { sanitize, isValidDisplayName } = require('../utils/helpers');
 
@@ -81,6 +82,28 @@ async function updateProfile(req, res, next) {
 
     const updated = await userModel.updateProfile(req.user.id, updates);
     await logActivity(req.user.id, 'profile_update', updates, req.ip);
+
+    // ---- Realtime push: sidebar, chat header, and user search should
+    // update instantly for everyone who can currently see this profile,
+    // without them needing to refresh. ----
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const payload = {
+          userId: updated.id,
+          displayName: updated.display_name,
+          avatarUrl: updated.avatar_url,
+          avatarColor: updated.avatar_color,
+        };
+        io.to(`user:${updated.id}`).emit('profile:updated', payload); // this user's other tabs/devices
+        const conversations = await conversationModel.listUserConversations(updated.id);
+        conversations.forEach((c) => io.to(`user:${c.other_user_id}`).emit('profile:updated', payload));
+        const groups = await groupModel.listUserGroups(updated.id);
+        groups.forEach((g) => io.to(`group:${g.id}`).emit('profile:updated', payload));
+      }
+    } catch (broadcastErr) {
+      // Realtime push is best-effort - never fail the profile update itself.
+    }
 
     res.json({
       success: true,
