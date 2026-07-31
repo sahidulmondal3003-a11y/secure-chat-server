@@ -10,14 +10,15 @@ async function createMessage({
   fileUrl = null,
   fileName = null,
   fileSize = null,
+  duration = null,
   replyToId = null,
 }) {
   const id = newId();
   await query(
     `INSERT INTO messages
-      (id, chat_type, chat_id, sender_id, reply_to_id, content, message_type, file_url, file_name, file_size)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, chatType, chatId, senderId, replyToId, content, messageType, fileUrl, fileName, fileSize]
+      (id, chat_type, chat_id, sender_id, reply_to_id, content, message_type, file_url, file_name, file_size, duration)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, chatType, chatId, senderId, replyToId, content, messageType, fileUrl, fileName, fileSize, duration]
   );
   return getMessageById(id);
 }
