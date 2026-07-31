@@ -878,7 +878,7 @@ function cancelEdit() {
 
 function updateSendBtn() {
   const val = document.getElementById('composerInput').value.trim();
-  document.getElementById('sendBtn').disabled = val.length === 0;
+  document.getElementById('composerAction').classList.toggle('has-text', val.length > 0);
 }
 
 function sendTextMessage() {
@@ -1018,6 +1018,25 @@ function toggleEmojiPanel() {
 // ============================================================
 // FILE UPLOAD
 // ============================================================
+// ============================================================
+// FLOATING BUTTON RIPPLE (material-style press feedback)
+// ============================================================
+function bindFloatingButtonRipples() {
+  document.querySelectorAll('.floating-btn').forEach((btn) => {
+    btn.addEventListener('pointerdown', (e) => {
+      const rect = btn.getBoundingClientRect();
+      const size = Math.max(rect.width, rect.height);
+      const span = document.createElement('span');
+      span.className = 'ripple';
+      span.style.width = span.style.height = `${size}px`;
+      span.style.left = `${(e.clientX ?? rect.left + rect.width / 2) - rect.left - size / 2}px`;
+      span.style.top = `${(e.clientY ?? rect.top + rect.height / 2) - rect.top - size / 2}px`;
+      btn.appendChild(span);
+      span.addEventListener('animationend', () => span.remove());
+    });
+  });
+}
+
 async function handleFileSelected(file) {
   if (!file || !activeChat) return;
   const maxMb = 50;
@@ -1533,6 +1552,7 @@ function bindGlobalUI() {
   bindNewChatSearch();
   bindSidebarSearch();
   bindMsgSearch();
+  bindFloatingButtonRipples();
 
   document.getElementById('fabNew').addEventListener('click', () => {
     document.getElementById('newChatSearch').value = '';
@@ -1557,7 +1577,7 @@ function bindGlobalUI() {
     updateSendBtn();
     notifyTyping();
     composer.style.height = 'auto';
-    composer.style.height = Math.min(composer.scrollHeight, 120) + 'px';
+    composer.style.height = composer.scrollHeight + 'px'; // CSS max-height (~5 lines) caps this and adds internal scroll
   });
   composer.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
