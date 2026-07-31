@@ -101,12 +101,52 @@ const Api = (() => {
     return data;
   }
 
+  // Uses XMLHttpRequest instead of fetch so we get real upload progress
+  // events (fetch has no upload progress API) - used for the upload
+  // progress bar / retry flow and for voice-message uploads.
+  function uploadFile(url, formData, onProgress) {
+    return new Promise((resolve, reject) => {
+      ensureCsrf().then((token) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url, true);
+        xhr.withCredentials = true;
+        xhr.setRequestHeader('X-CSRF-Token', token);
+        xhr.upload.onprogress = (e) => {
+          if (onProgress && e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+        };
+        xhr.onload = () => {
+          let data;
+          try {
+            data = JSON.parse(xhr.responseText);
+          } catch (e) {
+            data = { success: false, message: 'Invalid server response.' };
+          }
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(data);
+          } else {
+            const err = new Error(data.message || 'Upload failed');
+            err.status = xhr.status;
+            err.data = data;
+            reject(err);
+          }
+        };
+        xhr.onerror = () => {
+          const err = new Error('Network error during upload.');
+          err.networkError = true;
+          reject(err);
+        };
+        xhr.send(formData);
+      }).catch(reject);
+    });
+  }
+
   return {
     get: (url) => request('GET', url),
     post: (url, body) => request('POST', url, body),
     put: (url, body) => request('PUT', url, body),
     patch: (url, body) => request('PATCH', url, body),
     del: (url, body) => request('DELETE', url, body),
+    uploadFile,
     ensureCsrf,
   };
 })();

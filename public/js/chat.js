@@ -16,6 +16,7 @@ let replyTarget = null;
 let editTarget = null;
 let conversationsCache = [];
 let groupsCache = [];
+let lastUnreadMap = {};
 let onlineStatusCache = new Map();
 let messagesRendered = new Map(); // messageId -> DOM element, for current open chat
 let messagesData = new Map(); // messageId -> latest message object, for current open chat
@@ -118,6 +119,7 @@ function connectSocket() {
   socket.on('notification:new', onNotification);
   socket.on('group:member-joined', () => loadGroups());
   socket.on('group:member-left', () => loadGroups());
+  socket.on('profile:updated', onProfileUpdated);
 }
 
 // Nudge the socket to reconnect immediately when the browser regains
@@ -227,6 +229,7 @@ async function loadConversations() {
   (res.unread || []).forEach((u) => {
     unreadMap[`${u.chat_type}:${u.chat_id}`] = u.count;
   });
+  lastUnreadMap = unreadMap;
   renderChatList(unreadMap);
 }
 
@@ -481,7 +484,7 @@ function renderMessageBody(m) {
     return `${replyHtml}<video class="msg-video" src="${m.file_url}" controls></video>`;
   }
   if (m.message_type === 'audio') {
-    return `${replyHtml}<audio class="msg-audio" src="${m.file_url}" controls></audio>`;
+    return `${replyHtml}${buildVoicePlayer(m)}`;
   }
   // pdf, zip, apk, file
   return `${replyHtml}<a href="${m.file_url}" download="${escapeHtml(m.file_name || '')}" style="color:inherit;text-decoration:none;">
@@ -952,6 +955,50 @@ function onNotification({ chatType, chatId, from, preview }) {
 }
 
 // ============================================================
+// REALTIME PROFILE UPDATE
+// Fired whenever anyone visible to this session (self on another device,
+// a 1:1 chat partner, or a shared group member) changes their nickname or
+// picture. Patches every place their avatar/name is shown - no refresh.
+// ============================================================
+function onProfileUpdated({ userId, displayName, avatarUrl, avatarColor }) {
+  // Own account, updated from another tab/device.
+  if (me && userId === me.id) {
+    me = { ...me, displayName, avatarUrl, avatarColor };
+    document.getElementById('meName').textContent = displayName;
+    applyAvatar(document.getElementById('meAvatar'), { url: avatarUrl, color: avatarColor, name: displayName });
+  }
+
+  // Sidebar chat list (private conversations).
+  let touchedList = false;
+  conversationsCache.forEach((c) => {
+    if (c.other_user_id === userId) {
+      c.other_display_name = displayName;
+      c.other_avatar_url = avatarUrl;
+      c.other_avatar_color = avatarColor;
+      touchedList = true;
+    }
+  });
+  if (touchedList) renderChatList(lastUnreadMap);
+
+  // Currently open chat header (1:1 chat with this person).
+  if (activeChat && activeChat.type === 'private' && activeChat.otherUserId === userId) {
+    activeChat.name = displayName;
+    activeChat.avatarUrl = avatarUrl;
+    activeChat.avatarColor = avatarColor;
+    document.getElementById('chatHeaderName').textContent = displayName;
+    applyAvatar(document.getElementById('chatHeaderAvatar'), { url: avatarUrl, color: avatarColor, name: displayName });
+  }
+
+  // Any user-search results currently on screen (e.g. "new chat" picker).
+  document.querySelectorAll(`[data-user-id="${userId}"] .avatar`).forEach((el) => {
+    applyAvatar(el, { url: avatarUrl, color: avatarColor, name: displayName });
+  });
+  document.querySelectorAll(`[data-user-id="${userId}"] .user-result-name`).forEach((el) => {
+    el.textContent = displayName;
+  });
+}
+
+// ============================================================
 // EMOJI PICKER
 // ============================================================
 function buildEmojiPanel() {
@@ -982,9 +1029,10 @@ async function handleFileSelected(file) {
   const formData = new FormData();
   formData.append('file', file);
 
-  Toast.info('Uploading file...');
+  showUploadStatus(file.name);
   try {
-    const res = await Api.post('/api/uploads', formData);
+    const res = await Api.uploadFile('/api/uploads', formData, setUploadProgress);
+    dismissUploadStatus();
     socket.emit('message:send', {
       chatType: activeChat.type,
       chatId: activeChat.id,
@@ -999,17 +1047,307 @@ async function handleFileSelected(file) {
     });
     cancelReply();
   } catch (err) {
+    lastFailedUpload = { file };
+    uploadFailed();
     Toast.error(err.data?.message || err.message || 'Upload failed.');
+  }
+  document.getElementById('fileInput').value = ''; // allow re-picking the same file after a retry
+}
+
+// ============================================================
+// UPLOAD PROGRESS / RETRY BAR (shared by file attachments + voice messages)
+// ============================================================
+let lastFailedUpload = null;
+
+function showUploadStatus(label) {
+  const bar = document.getElementById('uploadStatusBar');
+  if (!bar) return;
+  bar.classList.remove('hidden');
+  document.getElementById('uploadStatusName').textContent = label;
+  document.getElementById('uploadStatusFill').style.width = '0%';
+  document.getElementById('uploadStatusRetry').classList.add('hidden');
+}
+function setUploadProgress(pct) {
+  const fill = document.getElementById('uploadStatusFill');
+  if (fill) fill.style.width = `${pct}%`;
+}
+function uploadFailed() {
+  document.getElementById('uploadStatusRetry').classList.remove('hidden');
+}
+function dismissUploadStatus() {
+  document.getElementById('uploadStatusBar').classList.add('hidden');
+  lastFailedUpload = null;
+}
+function retryLastUpload() {
+  if (!lastFailedUpload) return;
+  const { file } = lastFailedUpload;
+  lastFailedUpload = null;
+  handleFileSelected(file);
+}
+
+// ============================================================
+// VOICE MESSAGE RECORDING (MediaRecorder) + CUSTOM PLAYER
+// ============================================================
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordingStartTime = null;
+let recordingTimerInterval = null;
+const MAX_RECORDING_SECONDS = 5 * 60;
+
+async function toggleVoiceRecording() {
+  if (mediaRecorder && mediaRecorder.state === 'recording') return;
+  if (!activeChat) {
+    Toast.error('Open a chat first.');
+    return;
+  }
+  if (!navigator.mediaDevices || !window.MediaRecorder) {
+    Toast.error('Voice recording is not supported in this browser.');
+    return;
+  }
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    Toast.error('Microphone access was denied.');
+    return;
+  }
+
+  const mimeType = ['audio/webm', 'audio/ogg'].find((t) => MediaRecorder.isTypeSupported(t)) || '';
+  recordedChunks = [];
+  mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  mediaRecorder.addEventListener('dataavailable', (e) => {
+    if (e.data && e.data.size > 0) recordedChunks.push(e.data);
+  });
+  mediaRecorder.start();
+  recordingStartTime = Date.now();
+
+  document.getElementById('micBtn').classList.add('recording');
+  document.getElementById('recordingBar').classList.remove('hidden');
+  updateRecordingTime();
+  recordingTimerInterval = setInterval(updateRecordingTime, 250);
+}
+
+function updateRecordingTime() {
+  const secs = Math.floor((Date.now() - recordingStartTime) / 1000);
+  document.getElementById('recordingTime').textContent = formatDuration(secs);
+  if (secs >= MAX_RECORDING_SECONDS) stopAndSendVoiceRecording();
+}
+
+function stopRecordingUI() {
+  clearInterval(recordingTimerInterval);
+  recordingTimerInterval = null;
+  document.getElementById('micBtn').classList.remove('recording');
+  document.getElementById('recordingBar').classList.add('hidden');
+}
+
+function cancelVoiceRecording() {
+  if (!mediaRecorder) return;
+  const stream = mediaRecorder.stream;
+  mediaRecorder.onstop = () => stream && stream.getTracks().forEach((t) => t.stop());
+  mediaRecorder.stop();
+  recordedChunks = [];
+  mediaRecorder = null;
+  stopRecordingUI();
+}
+
+function stopAndSendVoiceRecording() {
+  if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+  const durationSeconds = Math.round((Date.now() - recordingStartTime) / 1000);
+  const mimeType = mediaRecorder.mimeType || 'audio/webm';
+  const stream = mediaRecorder.stream;
+  mediaRecorder.onstop = async () => {
+    stream && stream.getTracks().forEach((t) => t.stop());
+    const blob = new Blob(recordedChunks, { type: mimeType });
+    recordedChunks = [];
+    mediaRecorder = null;
+    await sendVoiceMessage(blob, durationSeconds, mimeType);
+  };
+  mediaRecorder.stop();
+  stopRecordingUI();
+}
+
+async function sendVoiceMessage(blob, durationSeconds, mimeType) {
+  if (!activeChat) return;
+  if (!blob.size) {
+    Toast.error('Recording was empty.');
+    return;
+  }
+  const ext = mimeType.includes('ogg') ? 'ogg' : 'webm';
+  const fileName = `voice-${Date.now()}.${ext}`;
+  const file = new File([blob], fileName, { type: mimeType });
+  const formData = new FormData();
+  formData.append('file', file);
+
+  showUploadStatus('Voice message');
+  try {
+    const res = await Api.uploadFile('/api/uploads', formData, setUploadProgress);
+    dismissUploadStatus();
+    socket.emit('message:send', {
+      chatType: activeChat.type,
+      chatId: activeChat.id,
+      messageType: 'audio',
+      content: fileName,
+      fileUrl: res.file.url,
+      fileName,
+      fileSize: res.file.size,
+      duration: durationSeconds,
+      replyToId: replyTarget ? replyTarget.id : null,
+    }, (ack) => {
+      if (!ack.success) Toast.error(ack.message || 'Failed to send voice message.');
+    });
+    cancelReply();
+  } catch (err) {
+    lastFailedUpload = null; // re-recording is simpler than re-sending a blob
+    Toast.error(err.data?.message || err.message || 'Voice message upload failed.');
   }
 }
 
+// Deterministic pseudo-random bar heights from the message id, so a given
+// voice message always renders the same "waveform" shape across reloads.
+const WAVE_BAR_COUNT = 27;
+function waveformBars(seed) {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  const bars = [];
+  for (let i = 0; i < WAVE_BAR_COUNT; i++) {
+    h = (h * 1103515245 + 12345) >>> 0;
+    bars.push(28 + (h % 72)); // 28-99% bar height
+  }
+  return bars;
+}
+
+function buildVoicePlayer(m) {
+  const bars = waveformBars(m.id);
+  const barsHtml = bars.map((p) => `<span class="msg-voice-bar" style="height:${p}%"></span>`).join('');
+  return `
+    <div class="msg-voice" data-voice-id="${m.id}" data-src="${m.file_url}">
+      <button type="button" class="msg-voice-play" onclick="toggleVoicePlayback('${m.id}')">▶</button>
+      <div class="msg-voice-body">
+        <div class="msg-voice-wave" onclick="seekVoice(event, '${m.id}')">
+          ${barsHtml}
+          <div class="msg-voice-wave-fill" style="width:0%">${barsHtml}</div>
+        </div>
+        <div class="msg-voice-meta">
+          <span class="msg-voice-elapsed">0:00</span>
+          <span class="msg-voice-duration">${formatDuration(m.duration)}</span>
+        </div>
+      </div>
+      <a class="msg-voice-download" href="${m.file_url}" download title="Download">⬇</a>
+    </div>`;
+}
+
+// A single shared <audio> element is reused across all voice bubbles, so
+// starting playback on one message pauses whichever other one was playing -
+// same behaviour as WhatsApp/Telegram voice notes.
+let activeVoiceAudio = null;
+let activeVoiceId = null;
+
+function toggleVoicePlayback(id) {
+  const wrap = document.querySelector(`.msg-voice[data-voice-id="${id}"]`);
+  if (!wrap) return;
+
+  if (activeVoiceId === id && activeVoiceAudio) {
+    if (activeVoiceAudio.paused) activeVoiceAudio.play();
+    else activeVoiceAudio.pause();
+    return;
+  }
+
+  if (activeVoiceAudio) {
+    activeVoiceAudio.pause();
+    resetVoiceUI(activeVoiceId);
+  }
+
+  activeVoiceId = id;
+  activeVoiceAudio = new Audio(wrap.dataset.src);
+  activeVoiceAudio.preload = 'metadata';
+  activeVoiceAudio.addEventListener('timeupdate', () => updateVoiceProgress(id));
+  activeVoiceAudio.addEventListener('play', () => setVoicePlayIcon(id, '⏸'));
+  activeVoiceAudio.addEventListener('pause', () => setVoicePlayIcon(id, '▶'));
+  activeVoiceAudio.addEventListener('ended', () => resetVoiceUI(id));
+  activeVoiceAudio.play().catch(() => Toast.error('Could not play voice message.'));
+}
+
+function resetVoiceUI(id) {
+  setVoicePlayIcon(id, '▶');
+  updateVoiceProgressPct(id, 0);
+  setVoiceElapsed(id, 0);
+}
+function setVoicePlayIcon(id, icon) {
+  const wrap = document.querySelector(`.msg-voice[data-voice-id="${id}"]`);
+  if (wrap) wrap.querySelector('.msg-voice-play').textContent = icon;
+}
+function updateVoiceProgress(id) {
+  if (!activeVoiceAudio || activeVoiceId !== id || !activeVoiceAudio.duration) return;
+  updateVoiceProgressPct(id, (activeVoiceAudio.currentTime / activeVoiceAudio.duration) * 100);
+  setVoiceElapsed(id, activeVoiceAudio.currentTime);
+}
+function updateVoiceProgressPct(id, pct) {
+  const wrap = document.querySelector(`.msg-voice[data-voice-id="${id}"]`);
+  if (wrap) wrap.querySelector('.msg-voice-wave-fill').style.width = `${pct}%`;
+}
+function setVoiceElapsed(id, seconds) {
+  const wrap = document.querySelector(`.msg-voice[data-voice-id="${id}"]`);
+  if (wrap) wrap.querySelector('.msg-voice-elapsed').textContent = formatDuration(seconds);
+}
+function seekVoice(evt, id) {
+  if (activeVoiceId !== id || !activeVoiceAudio || !activeVoiceAudio.duration) return;
+  const rect = evt.currentTarget.getBoundingClientRect();
+  const pct = Math.min(1, Math.max(0, (evt.clientX - rect.left) / rect.width));
+  activeVoiceAudio.currentTime = pct * activeVoiceAudio.duration;
+}
+
+// ============================================================
+// MEDIA LOADER: fullscreen image preview - zoom, download, share
+// ============================================================
+let mediaZoomLevel = 1;
 function openMedia(type, url) {
   const modal = document.getElementById('mediaModal');
   const content = document.getElementById('mediaModalContent');
+  mediaZoomLevel = 1;
   if (type === 'image') {
-    content.innerHTML = `<img src="${url}" style="max-width:100%;max-height:88vh;border-radius:12px;">`;
+    content.innerHTML = `
+      <div class="media-modal-toolbar">
+        <button type="button" onclick="zoomMedia(-0.25)" title="Zoom out">−</button>
+        <button type="button" onclick="zoomMedia(0.25)" title="Zoom in">+</button>
+        <button type="button" onclick="downloadMedia('${url}')" title="Download">⬇</button>
+        <button type="button" onclick="shareMedia('${url}')" title="Share">↗</button>
+      </div>
+      <div class="media-modal-img-wrap"><img id="mediaModalImg" src="${url}"></div>`;
   }
   modal.classList.remove('hidden');
+}
+
+function zoomMedia(delta) {
+  const img = document.getElementById('mediaModalImg');
+  if (!img) return;
+  mediaZoomLevel = Math.min(4, Math.max(1, mediaZoomLevel + delta));
+  img.style.transform = `scale(${mediaZoomLevel})`;
+}
+
+function downloadMedia(url) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = url.split('/').pop();
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function shareMedia(url) {
+  const absoluteUrl = new URL(url, window.location.origin).href;
+  if (navigator.share) {
+    try {
+      await navigator.share({ url: absoluteUrl });
+    } catch (e) { /* user cancelled the share sheet */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(absoluteUrl);
+    Toast.success('Link copied to clipboard.');
+  } catch (e) {
+    Toast.error('Sharing is not supported on this browser.');
+  }
 }
 
 // ============================================================
@@ -1043,10 +1381,10 @@ function bindNewChatSearch() {
       const res = await Api.get(`/api/users/search?q=${encodeURIComponent(term)}`);
       resultsEl.innerHTML = res.users.length
         ? res.users.map((u) => `
-          <div class="member-row" onclick="startPrivateChat('${u.id}')">
+          <div class="member-row" data-user-id="${u.id}" onclick="startPrivateChat('${u.id}')">
             <div class="avatar sm" style="${avatarStyle(u.avatar_color, u.avatar_url)}">${avatarGlyph(u.avatar_url, u.display_name, false)}</div>
             <div>
-              <div style="font-weight:600;font-size:13.5px;">${escapeHtml(u.display_name)}</div>
+              <div class="user-result-name" style="font-weight:600;font-size:13.5px;">${escapeHtml(u.display_name)}</div>
               <div style="font-size:12px;color:var(--text-secondary);">@${escapeHtml(u.username)}</div>
             </div>
           </div>`).join('')
@@ -1231,6 +1569,7 @@ function bindGlobalUI() {
   document.getElementById('sendBtn').addEventListener('click', sendTextMessage);
   document.getElementById('emojiBtn').addEventListener('click', toggleEmojiPanel);
   document.getElementById('attachBtn').addEventListener('click', () => document.getElementById('fileInput').click());
+  document.getElementById('micBtn').addEventListener('click', toggleVoiceRecording);
   document.getElementById('fileInput').addEventListener('change', (e) => {
     const file = e.target.files[0];
     handleFileSelected(file);

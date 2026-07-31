@@ -107,6 +107,14 @@ function formatFileSize(bytes) {
   return `${val.toFixed(val < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
+// "3:07" - for voice message duration/elapsed time and the recording timer.
+function formatDuration(totalSeconds) {
+  const s = Math.max(0, Math.round(totalSeconds || 0));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
 function initials(name) {
   if (!name) return '?';
   return name.trim().slice(0, 2).toUpperCase();
