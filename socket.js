@@ -118,7 +118,7 @@ function initSocket(server) {
           return;
         }
 
-        const { chatType, chatId, content, messageType = 'text', fileUrl, fileName, fileSize, replyToId } = payload || {};
+        const { chatType, chatId, content, messageType = 'text', fileUrl, fileName, fileSize, duration, replyToId } = payload || {};
 
         if (!chatType || !chatId) {
           if (ack) ack({ success: false, message: 'chatType and chatId are required.' });
@@ -163,6 +163,7 @@ function initSocket(server) {
           fileUrl: fileUrl || null,
           fileName: fileName || null,
           fileSize: fileSize || null,
+          duration: messageType === 'audio' ? (parseInt(duration, 10) || null) : null,
           replyToId: replyToId || null,
         });
 

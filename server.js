@@ -184,7 +184,8 @@ app.use(
   app.use(errorHandler);
 
   const server = http.createServer(app);
-  initSocket(server);
+  const io = initSocket(server);
+  app.set('io', io); // lets REST controllers (e.g. profile updates) push realtime events
 
   // Keep-alive timeout must exceed the reverse proxy's own idle timeout
   // (Railway/Nginx/etc.), otherwise the proxy can send a request down a

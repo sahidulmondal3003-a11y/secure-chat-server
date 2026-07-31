@@ -109,6 +109,10 @@ CREATE TABLE IF NOT EXISTS `messages` (
 ALTER TABLE `messages` ADD COLUMN `deleted_by` VARCHAR(36) NULL AFTER `deleted_for_everyone`;
 ALTER TABLE `messages` ADD COLUMN `deleted_at` DATETIME NULL AFTER `deleted_by`;
 
+-- Voice message duration in seconds (also usable for video later). NULL for
+-- non-audio message types. Safe to fail/skip if the column already exists.
+ALTER TABLE `messages` ADD COLUMN `duration` INT NULL AFTER `file_size`;
+
 -- ------------------------------------------------------------
 -- Per-user "delete for me" tracking (message stays intact for
 -- everyone else; just hidden for the user who deleted it locally)
