@@ -408,7 +408,66 @@ a { color: var(--accent); text-decoration: none; }
 .msg-file-size { font-size: 11px; opacity: 0.75; }
 .msg-image { max-width: 240px; border-radius: 14px; display: block; cursor: pointer; }
 .msg-video { max-width: 260px; border-radius: 14px; }
-.msg-audio { width: 220px; }
+
+/* ---- Voice message player (custom, replaces bare <audio controls>) ---- */
+.msg-voice { display: flex; align-items: center; gap: 10px; width: 230px; padding: 4px 2px; }
+.msg-voice-play {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; border: none; cursor: pointer;
+  background: rgba(255,255,255,0.18); color: inherit; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; transition: var(--transition);
+}
+.msg-voice-play:hover { background: rgba(255,255,255,0.28); }
+.msg-voice-body { flex: 1; min-width: 0; }
+.msg-voice-wave {
+  position: relative; height: 22px; display: flex; align-items: center; gap: 2px; cursor: pointer;
+}
+.msg-voice-wave-fill {
+  position: absolute; inset: 0; width: 0%; overflow: hidden; display: flex; align-items: center; gap: 2px;
+  pointer-events: none;
+}
+.msg-voice-bar { width: 3px; border-radius: 2px; background: rgba(255,255,255,0.35); flex-shrink: 0; }
+.msg-voice-wave-fill .msg-voice-bar { background: #fff; }
+.msg-voice-meta { display: flex; justify-content: space-between; font-size: 10.5px; opacity: 0.8; margin-top: 2px; }
+.msg-voice-download { color: inherit; opacity: 0.75; text-decoration: none; font-size: 13px; flex-shrink: 0; }
+.msg-voice-download:hover { opacity: 1; }
+
+/* ---- Mic / voice recording composer state ---- */
+.mic-btn.recording { color: var(--danger); animation: pulse-rec 1.2s infinite; }
+@keyframes pulse-rec { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+.recording-bar {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+  background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 24px; margin: 0 16px 10px;
+}
+.recording-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); animation: pulse-rec 1s infinite; flex-shrink: 0; }
+.recording-time { font-variant-numeric: tabular-nums; font-size: 13.5px; font-weight: 600; }
+.recording-hint { flex: 1; font-size: 12px; color: var(--text-secondary); text-align: center; }
+.recording-cancel, .recording-send {
+  width: 34px; height: 34px; border-radius: 50%; border: none; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.recording-cancel { background: rgba(255,255,255,0.12); color: inherit; }
+.recording-send { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; }
+
+/* ---- Media modal toolbar (zoom / download / share) ---- */
+.media-modal-toolbar {
+  position: absolute; top: -48px; right: 0; display: flex; gap: 8px;
+}
+.media-modal-toolbar button {
+  width: 38px; height: 38px; border-radius: 50%; border: none; cursor: pointer;
+  background: rgba(255,255,255,0.14); color: #fff; font-size: 15px;
+  display: flex; align-items: center; justify-content: center; transition: var(--transition);
+}
+.media-modal-toolbar button:hover { background: rgba(255,255,255,0.26); }
+.media-modal-img-wrap { overflow: hidden; max-width: 92vw; max-height: 88vh; touch-action: none; }
+.media-modal-img-wrap img { display: block; transition: transform 0.15s ease; transform-origin: center center; }
+
+/* ---- Skeleton loaders for images/voice while sending/loading ---- */
+.msg-media-skeleton {
+  width: 220px; height: 140px; border-radius: 14px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.06) 25%, rgba(255,255,255,0.14) 37%, rgba(255,255,255,0.06) 63%);
+  background-size: 400% 100%; animation: skeleton-shimmer 1.4s ease infinite;
+}
+@keyframes skeleton-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 
 .typing-indicator { padding: 4px 16px; font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; min-height: 22px; }
 .typing-dots { display: inline-flex; gap: 3px; }
