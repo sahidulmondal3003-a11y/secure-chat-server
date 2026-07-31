@@ -93,6 +93,24 @@
         <button class="btn-icon" onclick="cancelEdit()">✕</button>
       </div>
 
+      <div class="reply-preview glass hidden" id="uploadStatusBar" style="justify-content:flex-start;gap:10px;">
+        <span>📎</span>
+        <div style="flex:1;min-width:0;">
+          <div id="uploadStatusName" style="font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+          <div class="upload-progress-bar"><div class="upload-progress-fill" id="uploadStatusFill" style="width:0%"></div></div>
+        </div>
+        <button type="button" class="btn hidden" id="uploadStatusRetry" onclick="retryLastUpload()" style="font-size:12px;padding:4px 10px;">Retry</button>
+        <button class="btn-icon" onclick="dismissUploadStatus()">✕</button>
+      </div>
+
+      <div class="recording-bar hidden" id="recordingBar">
+        <span class="recording-dot"></span>
+        <span class="recording-time" id="recordingTime">0:00</span>
+        <span class="recording-hint">Recording voice message… max 5:00</span>
+        <button type="button" class="recording-cancel" onclick="cancelVoiceRecording()" title="Cancel">✕</button>
+        <button type="button" class="recording-send" onclick="stopAndSendVoiceRecording()" title="Send">➤</button>
+      </div>
+
       <div class="emoji-panel glass hidden" id="emojiPanel"></div>
 
       <div class="composer glass">
@@ -102,6 +120,7 @@
           <textarea class="composer-input" id="composerInput" placeholder="Type a message..." rows="1"></textarea>
           <button class="btn-icon" id="emojiBtn" title="Emoji">😊</button>
         </div>
+        <button class="btn-icon mic-btn" id="micBtn" title="Record voice message">🎤</button>
         <button class="send-btn" id="sendBtn" disabled>➤</button>
       </div>
     </div>
@@ -257,7 +276,7 @@
 
 <!-- ============ MODAL: Image / Video preview ============ -->
 <div class="modal-overlay hidden" id="mediaModal" onclick="if(event.target===this) closeModal('mediaModal')">
-  <div id="mediaModalContent" style="max-width:92vw;max-height:88vh;"></div>
+  <div id="mediaModalContent" style="max-width:92vw;max-height:88vh;position:relative;"></div>
 </div>
 
 <script src="/js/api.js"></script>
