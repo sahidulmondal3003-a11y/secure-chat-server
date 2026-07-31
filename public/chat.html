@@ -113,15 +113,25 @@
 
       <div class="emoji-panel glass hidden" id="emojiPanel"></div>
 
-      <div class="composer glass">
-        <button class="btn-icon" id="attachBtn" title="Attach file">📎</button>
+      <div class="composer">
+        <button type="button" class="floating-btn floating-btn--attach" id="attachBtn" title="Attach file" aria-label="Attach file">
+          <span class="floating-btn-icon">📎</span>
+        </button>
         <input type="file" id="fileInput" class="hidden">
-        <div class="composer-input-wrap">
-          <textarea class="composer-input" id="composerInput" placeholder="Type a message..." rows="1"></textarea>
-          <button class="btn-icon" id="emojiBtn" title="Emoji">😊</button>
+
+        <div class="composer-field">
+          <textarea class="composer-input" id="composerInput" placeholder="Type a message..." rows="1" maxlength="5000"></textarea>
+          <button type="button" class="btn-icon composer-emoji-btn" id="emojiBtn" title="Emoji" aria-label="Emoji">😊</button>
         </div>
-        <button class="btn-icon mic-btn" id="micBtn" title="Record voice message">🎤</button>
-        <button class="send-btn" id="sendBtn" disabled>➤</button>
+
+        <div class="composer-action" id="composerAction">
+          <button type="button" class="floating-btn floating-btn--mic" id="micBtn" title="Record voice message" aria-label="Record voice message">
+            <span class="floating-btn-icon">🎤</span>
+          </button>
+          <button type="button" class="floating-btn floating-btn--send" id="sendBtn" title="Send message" aria-label="Send message">
+            <span class="floating-btn-icon">➤</span>
+          </button>
+        </div>
       </div>
     </div>
   </main>
