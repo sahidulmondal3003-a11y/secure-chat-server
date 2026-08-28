@@ -11,15 +11,53 @@ const config = require("./config");
 let pool;
 
 /**
- * Create database only for local MySQL.
- * Railway already creates the database.
+ * Managed providers that require an encrypted connection and already
+ * provision a default database for you (so CREATE DATABASE either isn't
+ * needed or isn't permitted for the app's user).
+ */
+function isManagedTlsHost() {
+  return (
+    config.db.host.includes("aivencloud.com") ||
+    config.db.host.includes("pscale.host") || // PlanetScale
+    config.db.host.includes("psdb.cloud")
+  );
+}
+
+/**
+ * Build the mysql2 ssl option, if any.
+ * - Explicit DB_SSL=true (or a known managed host) turns TLS on.
+ * - A base64 CA cert (DB_CA_CERT_BASE64) enables full certificate
+ *   verification; without it we still encrypt but skip verifying the
+ *   server's certificate chain (fine to get started, less strict).
+ */
+function getSslOptions() {
+  const wantsSsl = config.db.ssl || isManagedTlsHost();
+  if (!wantsSsl) return undefined;
+
+  if (config.db.caCertBase64) {
+    return {
+      ca: Buffer.from(config.db.caCertBase64, "base64").toString("utf8"),
+      rejectUnauthorized: true,
+    };
+  }
+
+  console.log("[DB] TLS enabled without a CA certificate (DB_CA_CERT_BASE64 not set) - connection is encrypted but the server certificate is not verified.");
+  return { rejectUnauthorized: false };
+}
+
+/**
+ * Create database only for local/self-hosted MySQL.
+ * Railway and other managed providers (Aiven, PlanetScale, ...) already
+ * create the database for you, and their app users often can't CREATE
+ * DATABASE anyway.
  */
 async function ensureDatabaseExists() {
   if (
     config.db.host.includes("railway.internal") ||
-    config.db.host.includes("proxy.rlwy.net")
+    config.db.host.includes("proxy.rlwy.net") ||
+    isManagedTlsHost()
   ) {
-    console.log("[DB] Railway detected. Skip CREATE DATABASE.");
+    console.log("[DB] Managed provider detected. Skip CREATE DATABASE.");
     return;
   }
 
@@ -28,6 +66,7 @@ async function ensureDatabaseExists() {
     port: config.db.port,
     user: config.db.user,
     password: config.db.password,
+    ssl: getSslOptions(),
   });
 
   await conn.query(`
@@ -113,6 +152,8 @@ async function initDb() {
 
     charset: "utf8mb4",
     dateStrings: true,
+
+    ssl: getSslOptions(),
 
   });
 

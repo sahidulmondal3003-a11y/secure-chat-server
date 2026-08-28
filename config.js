@@ -31,6 +31,15 @@ const config = {
     password: required('DB_PASSWORD', ''),
     database: required('DB_NAME', 'secure_chat_server'),
     connectionLimit: parseInt(required('DB_CONNECTION_LIMIT', '10'), 10),
+    // SSL/TLS to the database - required by managed providers like Aiven,
+    // PlanetScale, etc. DB_SSL=true turns it on explicitly; it's also
+    // auto-detected for known managed hosts (see db.js).
+    ssl: required('DB_SSL', 'false') === 'true',
+    // Optional CA certificate, base64-encoded, so it survives being pasted
+    // into a single-line environment variable field (e.g. Render's UI).
+    // Get this from Aiven Console -> your service -> Overview -> CA
+    // certificate -> Download, then base64-encode the file's contents.
+    caCertBase64: required('DB_CA_CERT_BASE64', ''),
   },
 
   jwt: {
