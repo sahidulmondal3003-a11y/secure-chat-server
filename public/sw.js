@@ -15,7 +15,7 @@
  *    offline, but always prefers fresh content when online.
  */
 
-const CACHE_VERSION = 'scs-shell-v1';
+const CACHE_VERSION = 'scs-shell-v2';
 const APP_SHELL = [
   '/',
   '/chat',
