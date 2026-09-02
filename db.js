@@ -179,11 +179,36 @@ function getPool() {
 
 }
 
+// MySQL (with dateStrings: true) returns DATETIME columns as plain
+// "YYYY-MM-DD HH:MM:SS" strings with no timezone marker. These values are
+// stored via NOW(), which is UTC on Railway/managed MySQL. Without a "Z"
+// suffix, `new Date(str)` on the frontend parses them as the *browser's*
+// local time instead of UTC, silently shifting every timestamp (last_seen,
+// created_at, joined_at, message times, ...) by the viewer's UTC offset.
+// This normalizes any such string into a real ISO-8601 UTC string before
+// it ever leaves the DB layer, so every consumer gets a correct timestamp.
+const MYSQL_DATETIME_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/;
+
+function normalizeDates(value) {
+  if (Array.isArray(value)) {
+    return value.map(normalizeDates);
+  }
+  if (value && typeof value === "object") {
+    for (const key of Object.keys(value)) {
+      const v = value[key];
+      if (typeof v === "string" && MYSQL_DATETIME_RE.test(v)) {
+        value[key] = v.replace(" ", "T") + "Z";
+      }
+    }
+  }
+  return value;
+}
+
 async function query(sql, params = []) {
 
   const [rows] = await getPool().query(sql, params);
 
-  return rows;
+  return normalizeDates(rows);
 
 }
 
