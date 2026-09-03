@@ -57,7 +57,7 @@
     bannerEl.innerHTML = `
       <div class="pwa-icon">🔐</div>
       <div class="pwa-text">
-        <div class="pwa-title">Install Secure Chat</div>
+        <div class="pwa-title">Install CUTE</div>
         <div class="pwa-subtitle">${subtitle}</div>
       </div>
       <div class="pwa-actions">
@@ -95,7 +95,7 @@
           deferredPrompt.prompt();
           const { outcome } = await deferredPrompt.userChoice;
           if (outcome === 'accepted') {
-            Toast?.success?.('Installing Secure Chat…');
+            Toast?.success?.('Installing CUTE…');
           }
           deferredPrompt = null;
           hideInstallButtonIfPresent();
@@ -108,7 +108,7 @@
     deferredPrompt = null;
     removeBanner();
     hideInstallButtonIfPresent();
-    Toast?.success?.('Secure Chat installed!');
+    Toast?.success?.('CUTE installed!');
   });
 
   // ---- iOS Safari (no beforeinstallprompt support) -----------------------

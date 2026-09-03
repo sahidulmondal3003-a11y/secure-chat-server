@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Secure Chat Server</title>
+<title>CUTE</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
@@ -12,7 +12,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="SecureChat">
+<meta name="apple-mobile-web-app-title" content="CUTE">
 <link rel="apple-touch-icon" href="/icons/icon-180.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
@@ -68,7 +68,7 @@
       <div style="font-size:13px;">Your conversations are private and secure.</div>
     </div>
 
-    <div class="hidden" id="activeChatArea" style="display:none;flex-direction:column;height:100%;">
+    <div class="hidden" id="activeChatArea" style="display:none;flex-direction:column;height:100%;position:relative;">
       <div class="chat-window-header glass">
         <button class="btn-icon back-btn" onclick="backToList()">←</button>
         <div class="avatar" id="chatHeaderAvatar"></div>
@@ -89,6 +89,10 @@
       <div class="search-results-panel glass hidden" id="msgSearchResults"></div>
 
       <div class="messages-area" id="messagesArea"></div>
+      <div class="new-messages-pill" id="newMessagesPill" onclick="jumpToBottom()">New messages ↓</div>
+      <button type="button" class="btn-icon glass scroll-bottom-btn" id="scrollBottomBtn" onclick="jumpToBottom()" title="Scroll to latest" aria-label="Scroll to latest messages">
+        ↓<span class="unread-dot hidden" id="scrollBottomUnread">0</span>
+      </button>
       <div class="typing-indicator" id="typingIndicator"></div>
 
       <div class="reply-preview glass hidden" id="replyPreview">
@@ -127,7 +131,7 @@
         <button type="button" class="floating-btn floating-btn--attach" id="attachBtn" title="Attach file" aria-label="Attach file">
           <span class="floating-btn-icon">📎</span>
         </button>
-        <input type="file" id="fileInput" class="hidden">
+        <input type="file" id="fileInput" class="hidden" multiple>
 
         <div class="composer-field">
           <textarea class="composer-input" id="composerInput" placeholder="Type a message..." rows="1" maxlength="5000"></textarea>
@@ -291,6 +295,29 @@
       <div class="error-text" id="profileFormError"></div>
       <button type="submit" class="btn btn-primary" style="width:100%">Save Changes</button>
     </form>
+  </div>
+</div>
+
+<!-- ============ MODAL: Photo preview before sending ============ -->
+<div class="modal-overlay hidden" id="photoPreviewModal">
+  <div class="modal-box glass">
+    <div class="modal-title">
+      <span>Send photo</span>
+      <button class="btn-icon" onclick="cancelPhotoPreview()">✕</button>
+    </div>
+    <div class="photo-preview-frame">
+      <img id="photoPreviewImg" alt="Selected photo preview">
+    </div>
+    <div class="photo-preview-meta">
+      <span id="photoPreviewName"></span>
+      <span id="photoPreviewSize"></span>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" style="flex:1" onclick="cancelPhotoPreview()">Cancel</button>
+      <button type="button" class="btn btn-primary" style="flex:1" id="photoPreviewSendBtn" onclick="confirmSendPhoto()">
+        <span id="photoPreviewSendBtnText">Send</span>
+      </button>
+    </div>
   </div>
 </div>
 

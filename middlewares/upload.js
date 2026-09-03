@@ -21,8 +21,13 @@ function classify(mimetype, originalname) {
   return { dir: 'documents', type: 'file' };
 }
 
+// NOTE (security fix): '.svg' intentionally removed. SVG is an XML format
+// that can embed <script> — if served back with the app's own CSP (which
+// includes 'unsafe-inline' for legitimate app scripts) and opened as a
+// top-level document, an uploaded SVG could execute JS in the app's origin.
+// Raster formats below cannot do this.
 const ALLOWED_EXTENSIONS = new Set([
-  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg',
+  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
   '.mp4', '.mov', '.avi', '.mkv', '.webm',
   '.mp3', '.wav', '.ogg', '.m4a', '.opus',
   '.pdf', '.zip', '.rar', '.7z', '.apk',
