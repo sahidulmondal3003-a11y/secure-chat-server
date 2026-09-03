@@ -24,7 +24,6 @@ let starredMessages = new Set(); // client-side only "star" flags for this sessi
 let contextMenuMessageId = null;
 let pendingUndo = null; // { messageId, timeoutId }
 let pendingAvatarUrl; // undefined = no change staged, null = remove picture, string = newly uploaded url
-let chatLoadToken = 0; // bumped on every openChat() call to invalidate stale/in-flight history fetches
 
 // ============================================================
 // BOOTSTRAP
@@ -351,14 +350,6 @@ async function openChat(chatType, chatId, meta) {
 
   socket.emit('chat:join', { chatType, chatId });
 
-  // Guards against two races: (1) a live 'message:new' arriving while this
-  // history fetch is still in flight - without this, the fetch resolving
-  // would wipe it back out via innerHTML=''; (2) the user opening a second
-  // chat before this fetch resolves - without this, chat A's slower
-  // response can land after chat B is already open and inject A's
-  // messages into B's view.
-  const loadToken = ++chatLoadToken;
-
   const messagesArea = document.getElementById('messagesArea');
   messagesArea.innerHTML = '<div class="empty-state">Loading messages...</div>';
   messagesRendered.clear();
@@ -366,19 +357,9 @@ async function openChat(chatType, chatId, meta) {
 
   try {
     const res = await Api.get(`/api/messages/${chatType}/${chatId}/history?limit=40`);
-    if (loadToken !== chatLoadToken) return; // a different chat was opened meanwhile - drop this stale response
-
-    // Preserve anything that arrived live via socket while we were loading
-    // history, so it isn't erased by the DOM wipe below.
-    const historyIds = new Set(res.messages.map((m) => m.id));
-    const liveArrivals = [];
-    messagesData.forEach((m, id) => { if (!historyIds.has(id)) liveArrivals.push(m); });
-
     messagesArea.innerHTML = '';
-    messagesRendered.clear();
-    messagesData.clear();
     let lastDate = null;
-    res.messages.concat(liveArrivals).forEach((m) => {
+    res.messages.forEach((m) => {
       const dateLabel = formatDateLabel(m.created_at);
       if (dateLabel !== lastDate) {
         appendDateSeparator(dateLabel);
@@ -387,12 +368,10 @@ async function openChat(chatType, chatId, meta) {
       appendMessage(m, false);
     });
     scrollToBottom();
-    bindMessagesScrollTracking();
     socket.emit('chat:seen', { chatType, chatId });
     await loadConversations();
     if (chatType === 'group') await loadGroups();
   } catch (err) {
-    if (loadToken !== chatLoadToken) return;
     messagesArea.innerHTML = `<div class="empty-state">Failed to load messages.</div>`;
     Toast.error(err.message);
   }
@@ -465,63 +444,6 @@ function appendDateSeparator(label) {
 function scrollToBottom() {
   const area = document.getElementById('messagesArea');
   area.scrollTop = area.scrollHeight;
-  hideNewMessagesPill();
-  updateScrollBottomBtn();
-}
-
-// "Near bottom" = within ~120px of the latest message, matching the usual
-// chat-app convention for whether new messages should auto-scroll.
-function isNearBottom() {
-  const area = document.getElementById('messagesArea');
-  if (!area) return true;
-  return area.scrollHeight - area.scrollTop - area.clientHeight < 120;
-}
-
-function jumpToBottom() {
-  const area = document.getElementById('messagesArea');
-  area.scrollTo({ top: area.scrollHeight, behavior: prefersReducedMotionChat() ? 'auto' : 'smooth' });
-  hideNewMessagesPill();
-}
-
-function prefersReducedMotionChat() {
-  return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
-let unreadWhileScrolledUp = 0;
-function hideNewMessagesPill() {
-  unreadWhileScrolledUp = 0;
-  const pill = document.getElementById('newMessagesPill');
-  if (pill) pill.classList.remove('visible');
-  const dot = document.getElementById('scrollBottomUnread');
-  if (dot) dot.classList.add('hidden');
-}
-
-function showNewMessagesPill() {
-  unreadWhileScrolledUp++;
-  const pill = document.getElementById('newMessagesPill');
-  if (pill) {
-    pill.textContent = unreadWhileScrolledUp > 1 ? `${unreadWhileScrolledUp} new messages ↓` : 'New messages ↓';
-    pill.classList.add('visible');
-  }
-  const dot = document.getElementById('scrollBottomUnread');
-  if (dot) {
-    dot.textContent = String(unreadWhileScrolledUp);
-    dot.classList.remove('hidden');
-  }
-}
-
-function updateScrollBottomBtn() {
-  const btn = document.getElementById('scrollBottomBtn');
-  if (!btn) return;
-  btn.classList.toggle('visible', !isNearBottom());
-  if (isNearBottom()) hideNewMessagesPill();
-}
-
-function bindMessagesScrollTracking() {
-  const area = document.getElementById('messagesArea');
-  if (!area || area.dataset.scrollBound) return;
-  area.dataset.scrollBound = '1';
-  area.addEventListener('scroll', updateScrollBottomBtn, { passive: true });
 }
 
 // ============================================================
@@ -534,19 +456,6 @@ function buildTicks(msg) {
   if (msg.status === 'delivered') icon = '✓✓';
   if (msg.status === 'seen') { icon = '✓✓'; color = '#22d3ee'; }
   return `<span class="msg-ticks" style="color:${color}">${icon}</span>`;
-}
-
-// Rebuilds a failed chat-image thumbnail with a fresh skeleton + cache-busted
-// URL, so a flaky network blip doesn't permanently show a broken-image icon.
-function retryImageLoad(linkEl, url) {
-  const wrap = linkEl.closest('.msg-image-wrap');
-  if (!wrap) return;
-  const bust = `${url}${url.includes('?') ? '&' : '?'}retry=${Date.now()}`;
-  wrap.innerHTML = `<div class="msg-media-skeleton" style="position:absolute;inset:0;"></div>
-    <img class="msg-image is-loading" src="${bust}" alt="Photo message"
-      onclick="openMedia('image','${url}')"
-      onload="this.classList.remove('is-loading'); this.previousElementSibling.remove();"
-      onerror="this.closest('.msg-image-wrap').innerHTML='<div class=\\'msg-image-fallback\\'><span>⚠️ Photo failed to load</span><span class=\\'retry-link\\' onclick=\\'retryImageLoad(this,&quot;${url}&quot;)\\'>Retry</span></div>'">`;
 }
 
 function fileIconFor(type) {
@@ -569,14 +478,7 @@ function renderMessageBody(m) {
     return `${replyHtml}<div>${escapeHtml(m.content)}</div>`;
   }
   if (m.message_type === 'image') {
-    const safeUrl = escapeHtml(m.file_url);
-    return `${replyHtml}<div class="msg-image-wrap">
-      <div class="msg-media-skeleton" style="position:absolute;inset:0;"></div>
-      <img class="msg-image is-loading" src="${safeUrl}" alt="Photo message" loading="lazy" decoding="async"
-        onclick="openMedia('image','${safeUrl}')"
-        onload="this.classList.remove('is-loading'); this.previousElementSibling.remove();"
-        onerror="this.closest('.msg-image-wrap').innerHTML='<div class=\\'msg-image-fallback\\'><span>⚠️ Photo failed to load</span><span class=\\'retry-link\\' onclick=\\'retryImageLoad(this,&quot;${safeUrl}&quot;)\\'>Retry</span></div>'">
-    </div>`;
+    return `${replyHtml}<img class="msg-image" src="${m.file_url}" onclick="openMedia('image','${m.file_url}')" loading="lazy">`;
   }
   if (m.message_type === 'video') {
     return `${replyHtml}<video class="msg-video" src="${m.file_url}" controls></video>`;
@@ -599,23 +501,6 @@ function renderMessageBody(m) {
 function appendMessage(m, animate = true, prepend = false) {
   const area = document.getElementById('messagesArea');
   const mine = m.sender_id === me.id;
-
-  // Guard against double-rendering the same message (e.g. a socket replay
-  // after reconnect, or a live event racing the initial history fetch).
-  // Update the existing bubble in place instead of creating a duplicate row.
-  const existingRow = messagesRendered.get(m.id);
-  if (existingRow && existingRow.isConnected) {
-    messagesData.set(m.id, m);
-    const bubble = existingRow.querySelector('.msg-bubble');
-    if (bubble) {
-      bubble.innerHTML = `${renderMessageBody(m)}${!m.is_deleted ? `<div class="msg-meta">
-        ${m.is_edited ? '<span class="msg-edited-tag">edited</span>' : ''}
-        <span>${formatClock(m.created_at)}</span>
-        ${buildTicks(m)}
-      </div>` : ''}`;
-    }
-    return;
-  }
 
   const row = document.createElement('div');
   row.className = `msg-row ${mine ? 'mine' : 'theirs'}`;
@@ -895,18 +780,8 @@ function undoDelete() {
 function onIncomingMessage(m) {
   const belongsToActive = activeChat && activeChat.type === m.chat_type && activeChat.id === m.chat_id;
   if (belongsToActive) {
-    const wasNearBottom = isNearBottom();
-    const isOwnMessage = m.sender_id === me.id;
     appendMessage(m);
-    // Only auto-follow the conversation when the user is already at the
-    // bottom (or it's their own message) - otherwise leave their scroll
-    // position alone and surface a "New messages" pill instead.
-    if (isOwnMessage || wasNearBottom) {
-      scrollToBottom();
-    } else {
-      showNewMessagesPill();
-      updateScrollBottomBtn();
-    }
+    scrollToBottom();
     if (m.sender_id !== me.id) {
       socket.emit('chat:seen', { chatType: activeChat.type, chatId: activeChat.id });
     }
@@ -1205,72 +1080,6 @@ function bindMobileKeyboardFix() {
   applyViewportHeight();
 }
 
-// ============================================================
-// PHOTO PREVIEW BEFORE SENDING (select -> preview -> confirm/cancel -> send)
-// ============================================================
-let pendingPhotoFiles = [];
-let pendingPhotoObjectUrl = null;
-let photoSendInFlight = false;
-
-function showPhotoPreview(files) {
-  pendingPhotoFiles = files.slice();
-  const first = pendingPhotoFiles[0];
-
-  if (pendingPhotoObjectUrl) URL.revokeObjectURL(pendingPhotoObjectUrl);
-  pendingPhotoObjectUrl = URL.createObjectURL(first);
-
-  const img = document.getElementById('photoPreviewImg');
-  img.src = pendingPhotoObjectUrl;
-
-  const extra = pendingPhotoFiles.length > 1 ? ` (+${pendingPhotoFiles.length - 1} more)` : '';
-  document.getElementById('photoPreviewName').textContent = `${first.name}${extra}`;
-  document.getElementById('photoPreviewSize').textContent = formatFileSize(
-    pendingPhotoFiles.reduce((sum, f) => sum + f.size, 0)
-  );
-  document.getElementById('photoPreviewSendBtnText').textContent =
-    pendingPhotoFiles.length > 1 ? `Send ${pendingPhotoFiles.length} photos` : 'Send';
-
-  openModal('photoPreviewModal');
-}
-
-function cancelPhotoPreview() {
-  closeModal('photoPreviewModal');
-  if (pendingPhotoObjectUrl) {
-    URL.revokeObjectURL(pendingPhotoObjectUrl);
-    pendingPhotoObjectUrl = null;
-  }
-  pendingPhotoFiles = [];
-}
-
-async function confirmSendPhoto() {
-  if (photoSendInFlight || !pendingPhotoFiles.length) return;
-  photoSendInFlight = true;
-
-  const btn = document.getElementById('photoPreviewSendBtn');
-  const btnText = document.getElementById('photoPreviewSendBtnText');
-  const label = btnText.textContent;
-  btn.disabled = true;
-  btnText.innerHTML = '<span class="spinner"></span>';
-
-  const files = pendingPhotoFiles.slice();
-  closeModal('photoPreviewModal');
-  if (pendingPhotoObjectUrl) {
-    URL.revokeObjectURL(pendingPhotoObjectUrl);
-    pendingPhotoObjectUrl = null;
-  }
-  pendingPhotoFiles = [];
-
-  // Upload sequentially so the shared progress bar reflects one file at a
-  // time instead of racing multiple XHRs against the same UI.
-  for (const file of files) {
-    await handleFileSelected(file);
-  }
-
-  btn.disabled = false;
-  btnText.textContent = label;
-  photoSendInFlight = false;
-}
-
 async function handleFileSelected(file) {
   if (!file || !activeChat) return;
   const maxMb = 50;
@@ -1559,43 +1368,17 @@ function openMedia(type, url) {
   const content = document.getElementById('mediaModalContent');
   mediaZoomLevel = 1;
   if (type === 'image') {
-    const safeUrl = escapeHtml(url);
     content.innerHTML = `
       <div class="media-modal-toolbar">
-        <button type="button" onclick="zoomMedia(-0.25)" title="Zoom out" aria-label="Zoom out">−</button>
-        <button type="button" onclick="zoomMedia(0.25)" title="Zoom in" aria-label="Zoom in">+</button>
-        <button type="button" onclick="downloadMedia('${safeUrl}')" title="Download" aria-label="Download image">⬇</button>
-        <button type="button" onclick="shareMedia('${safeUrl}')" title="Share" aria-label="Share image">↗</button>
-        <button type="button" onclick="closeModal('mediaModal')" title="Close" aria-label="Close viewer">✕</button>
+        <button type="button" onclick="zoomMedia(-0.25)" title="Zoom out">−</button>
+        <button type="button" onclick="zoomMedia(0.25)" title="Zoom in">+</button>
+        <button type="button" onclick="downloadMedia('${url}')" title="Download">⬇</button>
+        <button type="button" onclick="shareMedia('${url}')" title="Share">↗</button>
       </div>
-      <div class="media-modal-img-wrap" id="mediaModalImgWrap">
-        <div class="media-modal-skeleton" id="mediaModalSkeleton"></div>
-        <img id="mediaModalImg" src="${safeUrl}" alt="Photo"
-          onload="document.getElementById('mediaModalSkeleton')?.remove(); this.classList.add('loaded');"
-          onerror="showMediaError('${safeUrl}')">
-      </div>`;
+      <div class="media-modal-img-wrap"><img id="mediaModalImg" src="${url}"></div>`;
   }
   modal.classList.remove('hidden');
 }
-
-function showMediaError(url) {
-  const wrap = document.getElementById('mediaModalImgWrap');
-  if (!wrap) return;
-  wrap.innerHTML = `<div class="media-modal-error">
-      <span>⚠️ This image could not be loaded.</span>
-      <button type="button" class="btn btn-ghost" onclick="openMedia('image','${url}')">Retry</button>
-    </div>`;
-}
-
-// Body-scroll lock for the fullscreen viewer: watches the modal's own
-// hidden/shown state instead of wrapping closeModal(), so it stays correct
-// no matter which path closes it (✕ button, backdrop click, or Escape).
-(function initMediaViewerScrollLock() {
-  const mediaModalEl = document.getElementById('mediaModal');
-  if (!mediaModalEl) return;
-  const sync = () => document.body.classList.toggle('media-viewer-open', !mediaModalEl.classList.contains('hidden'));
-  new MutationObserver(sync).observe(mediaModalEl, { attributes: true, attributeFilter: ['class'] });
-})();
 
 function zoomMedia(delta) {
   const img = document.getElementById('mediaModalImg');
@@ -1852,15 +1635,9 @@ function bindGlobalUI() {
   document.getElementById('attachBtn').addEventListener('click', () => document.getElementById('fileInput').click());
   document.getElementById('micBtn').addEventListener('click', toggleVoiceRecording);
   document.getElementById('fileInput').addEventListener('change', (e) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = ''; // allow re-picking the exact same file(s) later
-    if (!files.length) return;
-    const allImages = files.every((f) => f.type.startsWith('image/'));
-    if (allImages) {
-      showPhotoPreview(files);
-    } else {
-      files.forEach((f) => handleFileSelected(f));
-    }
+    const file = e.target.files[0];
+    handleFileSelected(file);
+    e.target.value = '';
   });
 
   document.getElementById('createGroupForm').addEventListener('submit', async (e) => {

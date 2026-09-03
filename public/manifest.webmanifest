@@ -1,6 +1,6 @@
 {
-  "name": "CUTE",
-  "short_name": "CUTE",
+  "name": "Secure Chat Server",
+  "short_name": "SecureChat",
   "description": "End-to-end structured, real-time & encrypted-at-rest chat",
   "id": "/",
   "start_url": "/chat?source=pwa",

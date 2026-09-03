@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>CUTE</title>
+<title>Secure Chat Server</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
@@ -12,7 +12,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="CUTE">
+<meta name="apple-mobile-web-app-title" content="SecureChat">
 <link rel="apple-touch-icon" href="/icons/icon-180.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
@@ -24,77 +24,68 @@
 </button>
 
 <div class="auth-page">
-  <div class="auth-card glass" id="authCard">
-    <div class="auth-logo auth-reveal-item" style="--reveal-delay:60ms">
+  <div class="auth-card glass">
+    <div class="auth-logo">
       <div class="logo-badge">🔐</div>
     </div>
-    <div class="auth-title auth-reveal-item" style="--reveal-delay:140ms">CUTE</div>
-    <div class="auth-subtitle auth-reveal-item" style="--reveal-delay:190ms">End-to-end structured, real-time &amp; encrypted-at-rest chat</div>
+    <div class="auth-title">Secure Chat Server</div>
+    <div class="auth-subtitle">End-to-end structured, real-time & encrypted-at-rest chat</div>
 
-    <div class="auth-tabs auth-reveal-item" style="--reveal-delay:240ms">
-      <div class="auth-tab-indicator" id="authTabIndicator"></div>
+    <div class="auth-tabs">
       <div class="auth-tab active" id="tabLogin" onclick="switchTab('login')">Login</div>
       <div class="auth-tab" id="tabRegister" onclick="switchTab('register')">Register</div>
     </div>
 
-    <div id="authFormsWrap">
     <!-- LOGIN FORM -->
-    <form id="loginForm" class="auth-form-slide">
-      <div class="field auth-reveal-item" style="--reveal-delay:290ms">
+    <form id="loginForm">
+      <div class="field">
         <label>Username</label>
         <div class="input-wrap">
           <span class="icon">👤</span>
           <input type="text" id="loginUsername" autocomplete="username" required maxlength="20" placeholder="your.username">
         </div>
       </div>
-      <div class="field auth-reveal-item" style="--reveal-delay:330ms">
+      <div class="field">
         <label>Password</label>
         <div class="input-wrap">
           <span class="icon">🔑</span>
           <input type="password" id="loginPassword" autocomplete="current-password" required placeholder="••••••••">
-          <button type="button" class="pw-toggle" data-target="loginPassword" aria-label="Show password">👁️</button>
         </div>
       </div>
-      <div class="error-text" id="loginError" role="alert" aria-live="polite"></div>
-      <button type="submit" class="btn btn-primary auth-reveal-item" style="width:100%;--reveal-delay:370ms" id="loginBtn">
+      <div class="error-text" id="loginError"></div>
+      <button type="submit" class="btn btn-primary" style="width:100%" id="loginBtn">
         <span id="loginBtnText">Login</span>
       </button>
     </form>
 
     <!-- REGISTER FORM -->
-    <form id="registerForm" class="hidden auth-form-slide">
-      <div class="field auth-reveal-item" style="--reveal-delay:290ms">
+    <form id="registerForm" class="hidden">
+      <div class="field">
         <label>Choose a Username</label>
         <div class="input-wrap">
           <span class="icon">👤</span>
-          <input type="text" id="regUsername" required minlength="3" maxlength="20" placeholder="e.g. sahin_dev" autocomplete="username">
+          <input type="text" id="regUsername" required minlength="3" maxlength="20" placeholder="e.g. sahin_dev">
         </div>
       </div>
-      <div class="field auth-reveal-item" style="--reveal-delay:330ms">
+      <div class="field">
         <label>Display Name</label>
         <div class="input-wrap">
           <span class="icon">✨</span>
           <input type="text" id="regDisplayName" maxlength="64" placeholder="Optional - shown to others">
         </div>
       </div>
-      <div class="field auth-reveal-item" style="--reveal-delay:370ms">
+      <div class="field">
         <label>Create a Password</label>
         <div class="input-wrap">
           <span class="icon">🔑</span>
-          <input type="password" id="regPassword" required minlength="6" placeholder="Min 6 characters" autocomplete="new-password">
-          <button type="button" class="pw-toggle" data-target="regPassword" aria-label="Show password">👁️</button>
+          <input type="password" id="regPassword" required minlength="6" placeholder="Min 6 characters">
         </div>
-        <div class="pw-strength" id="pwStrength" data-level="0">
-          <div class="pw-strength-seg"></div><div class="pw-strength-seg"></div><div class="pw-strength-seg"></div><div class="pw-strength-seg"></div>
-        </div>
-        <div class="pw-strength-label" id="pwStrengthLabel"></div>
       </div>
-      <div class="error-text" id="registerError" role="alert" aria-live="polite"></div>
-      <button type="submit" class="btn btn-primary auth-reveal-item" style="width:100%;--reveal-delay:410ms" id="registerBtn">
+      <div class="error-text" id="registerError"></div>
+      <button type="submit" class="btn btn-primary" style="width:100%" id="registerBtn">
         <span id="registerBtnText">Create Account</span>
       </button>
     </form>
-    </div>
   </div>
 </div>
 
@@ -102,45 +93,11 @@
 <script src="/js/ui-helpers.js"></script>
 <script src="/js/pwa.js"></script>
 <script>
-const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-let currentAuthTab = 'login';
-let authTabAnimating = false;
-
 function switchTab(tab) {
-  if (tab === currentAuthTab || authTabAnimating) return;
-  authTabAnimating = true;
-
   document.getElementById('tabLogin').classList.toggle('active', tab === 'login');
   document.getElementById('tabRegister').classList.toggle('active', tab === 'register');
-  document.getElementById('authTabIndicator').classList.toggle('pos-1', tab === 'register');
-
-  const outgoing = document.getElementById(tab === 'login' ? 'registerForm' : 'loginForm');
-  const incoming = document.getElementById(tab === 'login' ? 'loginForm' : 'registerForm');
-  const dir = tab === 'login' ? 'right' : 'left'; // register -> login slides from left reversed, etc.
-
-  if (prefersReducedMotion) {
-    outgoing.classList.add('hidden');
-    incoming.classList.remove('hidden');
-    currentAuthTab = tab;
-    authTabAnimating = false;
-    return;
-  }
-
-  outgoing.classList.add(dir === 'left' ? 'form-exit-left' : 'form-exit-right');
-  setTimeout(() => {
-    outgoing.classList.add('hidden');
-    outgoing.classList.remove('form-exit-left', 'form-exit-right');
-
-    incoming.classList.remove('hidden');
-    incoming.classList.add(dir === 'left' ? 'form-enter-right' : 'form-enter-left');
-    // Force reflow so the enter transition actually animates from that state.
-    void incoming.offsetWidth;
-    requestAnimationFrame(() => {
-      incoming.classList.remove('form-enter-left', 'form-enter-right');
-      setTimeout(() => { authTabAnimating = false; }, 280);
-    });
-    currentAuthTab = tab;
-  }, 260);
+  document.getElementById('loginForm').classList.toggle('hidden', tab !== 'login');
+  document.getElementById('registerForm').classList.toggle('hidden', tab !== 'register');
 }
 
 function setLoading(btn, textEl, loading, label) {
@@ -148,53 +105,12 @@ function setLoading(btn, textEl, loading, label) {
   textEl.innerHTML = loading ? '<span class="spinner"></span>' : label;
 }
 
-function shakeAuthCard() {
-  const card = document.getElementById('authCard');
-  card.classList.remove('shake');
-  void card.offsetWidth;
-  card.classList.add('shake');
-}
-
-// ---- Password show/hide toggles ----
-document.querySelectorAll('.pw-toggle').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const input = document.getElementById(btn.dataset.target);
-    const showing = input.type === 'text';
-    input.type = showing ? 'password' : 'text';
-    btn.textContent = showing ? '👁️' : '🙈';
-    btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
-  });
-});
-
-// ---- Password strength meter (register only) ----
-function passwordStrength(pw) {
-  if (!pw) return 0;
-  let score = 0;
-  if (pw.length >= 6) score++;
-  if (pw.length >= 10) score++;
-  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
-  if (/[0-9]/.test(pw) && /[^A-Za-z0-9]/.test(pw)) score++;
-  return Math.min(4, score);
-}
-const strengthLabels = ['', 'Weak', 'Fair', 'Good', 'Strong'];
-const regPasswordEl = document.getElementById('regPassword');
-if (regPasswordEl) {
-  regPasswordEl.addEventListener('input', () => {
-    const level = passwordStrength(regPasswordEl.value);
-    document.getElementById('pwStrength').setAttribute('data-level', String(level));
-    document.getElementById('pwStrengthLabel').textContent = regPasswordEl.value ? strengthLabels[level] : '';
-  });
-}
-
-let loginInFlight = false;
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  if (loginInFlight) return; // guard against double-tap / double-submit
   const errorEl = document.getElementById('loginError');
   errorEl.textContent = '';
   const btn = document.getElementById('loginBtn');
   const btnText = document.getElementById('loginBtnText');
-  loginInFlight = true;
   setLoading(btn, btnText, true, 'Login');
 
   try {
@@ -203,31 +119,20 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     const data = await Api.post('/api/auth/login', { username, password });
     localStorage.setItem('scs_user', JSON.stringify(data.user));
     localStorage.setItem('scs_access_token', data.accessToken);
-    Toast.success('Logged in! Redirecting...');
-    document.getElementById('authCard').style.transition = 'opacity 200ms ease, transform 200ms ease';
-    document.getElementById('authCard').style.opacity = '0';
-    document.getElementById('authCard').style.transform = 'translateY(-10px)';
-    setTimeout(() => { window.location.href = '/chat'; }, prefersReducedMotion ? 0 : 200);
+    window.location.href = data.user.role === 'admin' ? '/chat' : '/chat';
   } catch (err) {
-    const msg = err.networkError
-      ? 'Network error. Check your connection and try again.'
-      : (err.data?.message || err.message || 'Login failed.');
-    errorEl.textContent = msg;
-    shakeAuthCard();
-    loginInFlight = false;
+    errorEl.textContent = err.data?.message || err.message || 'Login failed.';
+  } finally {
     setLoading(btn, btnText, false, 'Login');
   }
 });
 
-let registerInFlight = false;
 document.getElementById('registerForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  if (registerInFlight) return; // guard against double-tap / double-submit
   const errorEl = document.getElementById('registerError');
   errorEl.textContent = '';
   const btn = document.getElementById('registerBtn');
   const btnText = document.getElementById('registerBtnText');
-  registerInFlight = true;
   setLoading(btn, btnText, true, 'Create Account');
 
   try {
@@ -240,19 +145,10 @@ document.getElementById('registerForm').addEventListener('submit', async (e) => 
     Toast.success('Account created! Redirecting...');
     setTimeout(() => (window.location.href = '/chat'), 600);
   } catch (err) {
-    const msg = err.networkError
-      ? 'Network error. Check your connection and try again.'
-      : (err.data?.message || err.message || 'Registration failed.');
-    errorEl.textContent = msg;
-    shakeAuthCard();
-    registerInFlight = false;
+    errorEl.textContent = err.data?.message || err.message || 'Registration failed.';
+  } finally {
     setLoading(btn, btnText, false, 'Create Account');
   }
-});
-
-// Trigger the entrance animation once styles are ready.
-requestAnimationFrame(() => {
-  document.getElementById('authCard').classList.add('reveal');
 });
 
 // If already logged in, skip straight to chat

@@ -110,13 +110,7 @@ const Api = (() => {
         const xhr = new XMLHttpRequest();
         xhr.open('POST', url, true);
         xhr.withCredentials = true;
-        xhr.timeout = 60000; // uploads get more slack than JSON requests, but must still fail visibly on a stalled connection
         xhr.setRequestHeader('X-CSRF-Token', token);
-        xhr.ontimeout = () => {
-          const err = new Error('Upload timed out. Check your connection and retry.');
-          err.networkError = true;
-          reject(err);
-        };
         xhr.upload.onprogress = (e) => {
           if (onProgress && e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
         };
