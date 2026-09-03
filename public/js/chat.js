@@ -24,6 +24,7 @@ let starredMessages = new Set(); // client-side only "star" flags for this sessi
 let contextMenuMessageId = null;
 let pendingUndo = null; // { messageId, timeoutId }
 let pendingAvatarUrl; // undefined = no change staged, null = remove picture, string = newly uploaded url
+let chatLoadToken = 0; // bumped on every openChat() call to invalidate stale/in-flight history fetches
 
 // ============================================================
 // BOOTSTRAP
@@ -350,6 +351,14 @@ async function openChat(chatType, chatId, meta) {
 
   socket.emit('chat:join', { chatType, chatId });
 
+  // Guards against two races: (1) a live 'message:new' arriving while this
+  // history fetch is still in flight - without this, the fetch resolving
+  // would wipe it back out via innerHTML=''; (2) the user opening a second
+  // chat before this fetch resolves - without this, chat A's slower
+  // response can land after chat B is already open and inject A's
+  // messages into B's view.
+  const loadToken = ++chatLoadToken;
+
   const messagesArea = document.getElementById('messagesArea');
   messagesArea.innerHTML = '<div class="empty-state">Loading messages...</div>';
   messagesRendered.clear();
@@ -357,9 +366,19 @@ async function openChat(chatType, chatId, meta) {
 
   try {
     const res = await Api.get(`/api/messages/${chatType}/${chatId}/history?limit=40`);
+    if (loadToken !== chatLoadToken) return; // a different chat was opened meanwhile - drop this stale response
+
+    // Preserve anything that arrived live via socket while we were loading
+    // history, so it isn't erased by the DOM wipe below.
+    const historyIds = new Set(res.messages.map((m) => m.id));
+    const liveArrivals = [];
+    messagesData.forEach((m, id) => { if (!historyIds.has(id)) liveArrivals.push(m); });
+
     messagesArea.innerHTML = '';
+    messagesRendered.clear();
+    messagesData.clear();
     let lastDate = null;
-    res.messages.forEach((m) => {
+    res.messages.concat(liveArrivals).forEach((m) => {
       const dateLabel = formatDateLabel(m.created_at);
       if (dateLabel !== lastDate) {
         appendDateSeparator(dateLabel);
@@ -373,6 +392,7 @@ async function openChat(chatType, chatId, meta) {
     await loadConversations();
     if (chatType === 'group') await loadGroups();
   } catch (err) {
+    if (loadToken !== chatLoadToken) return;
     messagesArea.innerHTML = `<div class="empty-state">Failed to load messages.</div>`;
     Toast.error(err.message);
   }
@@ -579,6 +599,23 @@ function renderMessageBody(m) {
 function appendMessage(m, animate = true, prepend = false) {
   const area = document.getElementById('messagesArea');
   const mine = m.sender_id === me.id;
+
+  // Guard against double-rendering the same message (e.g. a socket replay
+  // after reconnect, or a live event racing the initial history fetch).
+  // Update the existing bubble in place instead of creating a duplicate row.
+  const existingRow = messagesRendered.get(m.id);
+  if (existingRow && existingRow.isConnected) {
+    messagesData.set(m.id, m);
+    const bubble = existingRow.querySelector('.msg-bubble');
+    if (bubble) {
+      bubble.innerHTML = `${renderMessageBody(m)}${!m.is_deleted ? `<div class="msg-meta">
+        ${m.is_edited ? '<span class="msg-edited-tag">edited</span>' : ''}
+        <span>${formatClock(m.created_at)}</span>
+        ${buildTicks(m)}
+      </div>` : ''}`;
+    }
+    return;
+  }
 
   const row = document.createElement('div');
   row.className = `msg-row ${mine ? 'mine' : 'theirs'}`;
